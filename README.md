@@ -31,7 +31,7 @@ truth for both implementations.
 | Path        | Contents                                                        |
 | ----------- | --------------------------------------------------------------- |
 | `desktop/`  | Rust workspace: `nexus-core` (library) and `nexus-cli` (harness) |
-| `android/`  | Kotlin Android app (min SDK 26)                                  |
+| `android/`  | Kotlin Android app (min SDK 29 / Android 10)                     |
 | `protocol/` | Protocol specifications (framing, discovery, pairing, ...)       |
 
 ## Building

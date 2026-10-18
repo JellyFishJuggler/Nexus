@@ -1,5 +1,6 @@
 package dev.nexus.local
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -36,6 +37,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         controller = DiscoveryController(applicationContext)
+        handleConnectIntent(intent)
 
         setContent {
             NexusTheme {
@@ -73,6 +75,29 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleConnectIntent(intent)
+    }
+
+    /**
+     * Test-harness trigger: `adb shell am start -n dev.nexus.local/.MainActivity
+     * --es nexus_host <ip> --es nexus_port <port>` opens an outbound TLS
+     * session. Milestone A3 replaces this with the proper connect flow.
+     */
+    private fun handleConnectIntent(intent: Intent?) {
+        val host = intent?.getStringExtra(EXTRA_HOST) ?: return
+        val port = intent.getIntExtra(EXTRA_PORT, -1)
+        if (host.isNotEmpty() && port in 1..65535) {
+            controller.connectTo(host, port)
+        }
+    }
+
+    companion object {
+        private const val EXTRA_HOST = "nexus_host"
+        private const val EXTRA_PORT = "nexus_port"
     }
 }
 

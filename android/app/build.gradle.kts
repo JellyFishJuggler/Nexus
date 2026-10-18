@@ -9,7 +9,7 @@ android {
 
     defaultConfig {
         applicationId = "dev.nexus.local"
-        minSdk = 26
+        minSdk = 29
         targetSdk = 35
         versionCode = 1
         versionName = "0.1.0"
@@ -27,6 +27,12 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+        }
+    }
+    packaging {
+        resources {
+            // BouncyCastle ships the same OSGi manifest in every jar.
+            excludes += "META-INF/versions/9/OSGI-INF/MANIFEST.MF"
         }
     }
     compileOptions {
@@ -60,8 +66,12 @@ dependencies {
     implementation(libs.androidx.material3)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.timber)
+    implementation(libs.bcpkix)
 
     testImplementation(libs.junit)
+    // Real org.json for JVM unit tests (the framework's android.jar copy is
+    // a stub that throws at runtime).
+    testImplementation(libs.jsonTest)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(platform(libs.androidx.compose.bom))
