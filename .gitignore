@@ -1,0 +1,20 @@
+# Rust
+desktop/target/
+
+# Android
+android/local.properties
+android/.gradle/
+android/build/
+android/app/build/
+android-sdk/
+
+# Local toolchain extracts (not part of the repo)
+gradle-8.9/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.iml
+.idea/
+.vscode/
+fetch.log
