@@ -1,6 +1,6 @@
 # Nexus Connection Management
 
-Status: Implemented (Rust; Android frame codec + envelope + session loop implemented)  
+Status: Implemented (Rust `nexus-core`; Android `NexusSession` implements hello + heartbeat)  
 Protocol version: 1
 
 ## Overview
@@ -71,6 +71,13 @@ Rules:
 
 Any inbound frame counts as liveness; pongs are only sent for pings
 (current clock in `ts`).
+
+Android note: the Android `Connection` answers `system.ping` and consumes
+`system.pong`/`system.error` internally, so a pong is not observable above
+the frame loop. `NexusSession` therefore sends a ping every 15 s (keeping
+the peer's "any inbound frame within 60 s" satisfied) and relies on the
+connection's 60 s read timeout for its own staleness detection, rather than
+counting missed pongs.
 
 ## Reconnection
 

@@ -1,5 +1,6 @@
 package dev.nexus.local.connection
 
+import android.os.SystemClock
 import android.util.Log
 import dev.nexus.local.protocol.Envelope
 import dev.nexus.local.protocol.EnvelopeException
@@ -78,6 +79,18 @@ class Connection(
     var closed = false
         private set
 
+    /**
+     * Monotonic time (ms) of the last frame read from the peer, of any kind.
+     *
+     * Heartbeats count: a `system.ping`/`system.pong` is a frame. The session
+     * layer uses this for its "any inbound frame within 60 s" staleness rule
+     * (connection.md) — the read loop, not the application message callback,
+     * is the only place that can see control frames, so it owns the clock.
+     */
+    @Volatile
+    var lastActivityAt: Long = SystemClock.elapsedRealtime()
+        private set
+
     val peerDescription: String get() = "sha256=${peerFingerprint ?: "unknown"}"
 
     /** Start the read loop on a background thread. */
@@ -129,6 +142,7 @@ class Connection(
         try {
             while (!closed) {
                 val frame = Frames.read(input) ?: break
+                lastActivityAt = SystemClock.elapsedRealtime()
                 when (frame.type) {
                     Frames.CONTROL -> handleControl(frame.body)
                     Frames.DATA -> {

@@ -31,11 +31,13 @@ data class DeviceInfo(
 
         /**
          * Features this build actually implements. Kept accurate on purpose:
-         * peers use it to decide which UI affordances to offer, and none of
-         * the application features (clipboard/transfer/media) exist on
-         * Android yet.
+         * peers use it to decide which UI affordances to offer.
+         *
+         * `clipboard` is implemented as a foreground-only feature
+         * (protocol/clipboard.md § "Android limitations"); file transfer and
+         * media control do not exist yet.
          */
-        fun localFeatures(): List<String> = emptyList()
+        fun localFeatures(): List<String> = listOf("clipboard")
 
         /**
          * Parse a peer identity, rejecting malformed payloads.

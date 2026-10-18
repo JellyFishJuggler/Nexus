@@ -62,10 +62,13 @@ class DeviceInfoTest {
     }
 
     @Test
-    fun thisBuildAdvertisesNoApplicationFeatures() {
-        // Clipboard/transfer/media are not implemented on Android yet; the
-        // list must stay accurate so peers don't offer features we can't
-        // honour.
-        assertTrue(DeviceInfo.localFeatures().isEmpty())
+    fun thisBuildAdvertisesClipboardOnly() {
+        // The list must stay accurate so peers don't offer features we can't
+        // honour. Clipboard is implemented (foreground-only); transfers and
+        // media control are not.
+        val features = DeviceInfo.localFeatures()
+        assertEquals(listOf("clipboard"), features)
+        assertTrue("transfer must not be advertised yet", "transfer" !in features)
+        assertTrue("media must not be advertised yet", "media" !in features)
     }
 }

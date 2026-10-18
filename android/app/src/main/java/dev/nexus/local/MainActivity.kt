@@ -32,6 +32,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import dev.nexus.local.clipboard.ClipboardSync
 import dev.nexus.local.discovery.DiscoveryController
 import dev.nexus.local.discovery.PeerInfo
 import dev.nexus.local.pairing.PairingManager
@@ -54,6 +55,8 @@ class MainActivity : ComponentActivity() {
                 val pairingUi by controller.pairingUi.collectAsState()
                 val trusted by controller.trustedDevices.collectAsState()
                 val pairingMode by controller.pairingMode.collectAsState()
+                val session by controller.sessionUi.collectAsState()
+                val clipboard by controller.clipboardStatus.collectAsState()
                 val lifecycleOwner = LocalLifecycleOwner.current
 
                 DisposableEffect(lifecycleOwner) {
@@ -83,6 +86,8 @@ class MainActivity : ComponentActivity() {
                         peers = peers,
                         trusted = trusted,
                         pairingMode = pairingMode,
+                        session = session,
+                        clipboard = clipboard,
                         onStartPairingMode = { controller.startPairingMode() },
                         onPairPeer = { peer ->
                             if (peer.host.isNotEmpty() && peer.port in 1..65535) {
@@ -90,6 +95,7 @@ class MainActivity : ComponentActivity() {
                             }
                         },
                         onUnpair = { controller.unpair(it) },
+                        onPushClipboard = { controller.pushClipboard() },
                         modifier = Modifier.padding(innerPadding)
                     )
                 }
@@ -113,6 +119,8 @@ class MainActivity : ComponentActivity() {
      * - `--ez nexus_pairing true`      open the pairing window (responder)
      * - `--es nexus_autoconfirm CODE`  auto-accept when the code matches
      * - `--es nexus_host H --ei nexus_port P`  connect and pair (initiator)
+     * - `--es nexus_set_clipboard S`   simulate a local copy of `S` and send it
+     * - `--ez nexus_read_clipboard true`  log the current system clipboard
      */
     private fun handleHarnessIntent(intent: Intent?) {
         if (intent == null) return
@@ -120,12 +128,18 @@ class MainActivity : ComponentActivity() {
         val auto = intent.getStringExtra(EXTRA_AUTOCONFIRM)
         val host = intent.getStringExtra(EXTRA_HOST)
         val port = intent.getIntExtra(EXTRA_PORT, -1)
-        Log.i("NexusHarness", "intent extras: pairing=$pairing autoconfirm=$auto host=$host port=$port")
+        val clip = intent.getStringExtra(EXTRA_SET_CLIPBOARD)
+        val readClip = intent.getBooleanExtra(EXTRA_READ_CLIPBOARD, false)
+        Log.i(
+            "NexusHarness",
+            "intent extras: pairing=$pairing autoconfirm=$auto host=$host port=$port " +
+                "clip=$clip readClip=$readClip"
+        )
 
         // Some devices redeliver the launch intent several times. Ignore exact
         // repeats so the harness (a test-only path) does not open the pairing
         // window, or dial out, more than once per launch.
-        val signature = "p=$pairing;a=$auto;h=$host;o=$port"
+        val signature = "p=$pairing;a=$auto;h=$host;o=$port;c=$clip;r=$readClip"
         if (signature == lastHarnessSignature) {
             Log.i("NexusHarness", "duplicate harness intent ignored")
             return
@@ -137,6 +151,8 @@ class MainActivity : ComponentActivity() {
         if (host != null && host.isNotEmpty() && port in 1..65535) {
             controller.connectTo(host, port)
         }
+        clip?.let { controller.setLocalClipboard(it) }
+        if (readClip) controller.logClipboard()
     }
 
     companion object {
@@ -144,6 +160,8 @@ class MainActivity : ComponentActivity() {
         private const val EXTRA_PORT = "nexus_port"
         private const val EXTRA_PAIRING = "nexus_pairing"
         private const val EXTRA_AUTOCONFIRM = "nexus_autoconfirm"
+        private const val EXTRA_SET_CLIPBOARD = "nexus_set_clipboard"
+        private const val EXTRA_READ_CLIPBOARD = "nexus_read_clipboard"
 
         /** Process-wide so activity re-creation does not re-run the harness. */
         @Volatile
@@ -207,9 +225,12 @@ fun NexusScreen(
     peers: List<PeerInfo>,
     trusted: List<TrustedDevice>,
     pairingMode: Boolean,
+    session: DiscoveryController.SessionUi,
+    clipboard: ClipboardSync.Status,
     onStartPairingMode: () -> Unit,
     onPairPeer: (PeerInfo) -> Unit,
     onUnpair: (String) -> Unit,
+    onPushClipboard: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     LazyColumn(
@@ -228,6 +249,10 @@ fun NexusScreen(
                     style = MaterialTheme.typography.bodySmall
                 )
             }
+        }
+
+        item {
+            ConnectionCard(session = session, clipboard = clipboard, onPushClipboard = onPushClipboard)
         }
 
         item {
@@ -263,6 +288,49 @@ fun NexusScreen(
         }
         items(peers, key = { it.serviceName }) { peer ->
             PeerCard(peer, onPairPeer)
+        }
+    }
+}
+
+@Composable
+fun ConnectionCard(
+    session: DiscoveryController.SessionUi,
+    clipboard: ClipboardSync.Status,
+    onPushClipboard: () -> Unit
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(text = "Connection", style = MaterialTheme.typography.titleSmall)
+            Text(
+                text = if (session.ready) {
+                    "Connected to ${session.peerName ?: "a trusted device"}"
+                } else {
+                    "Not connected — a paired device will reconnect automatically."
+                },
+                style = MaterialTheme.typography.bodySmall
+            )
+            Text(
+                text = buildString {
+                    append("Clipboard: ")
+                    append(if (clipboard.connected) "linked" else "no session")
+                    append(if (clipboard.active) " · watching" else " · paused")
+                    clipboard.lastDirection?.let { append(" · last $it") }
+                },
+                style = MaterialTheme.typography.bodySmall
+            )
+            clipboard.lastPreview?.let {
+                Text(text = "“$it”", style = MaterialTheme.typography.bodySmall)
+            }
+            Text(text = clipboard.note, style = MaterialTheme.typography.labelSmall)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = onPushClipboard,
+                    enabled = clipboard.connected && clipboard.active
+                ) { Text("Send clipboard now") }
+            }
         }
     }
 }

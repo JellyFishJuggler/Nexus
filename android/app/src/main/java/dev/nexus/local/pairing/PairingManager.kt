@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.SystemClock
 import android.util.Log
 import dev.nexus.local.connection.Connection
+import dev.nexus.local.connection.TrustedSessionHandler
 import dev.nexus.local.identity.DeviceIdentity
 import dev.nexus.local.identity.NexusTlsIdentity
 import dev.nexus.local.protocol.DeviceInfo
@@ -43,7 +44,13 @@ import java.util.concurrent.atomic.AtomicLong
 class PairingManager(
     context: Context,
     private val identity: DeviceIdentity,
-    private val tlsIdentity: NexusTlsIdentity
+    private val tlsIdentity: NexusTlsIdentity,
+    /**
+     * Where trusted sessions go for the connection-level handshake and
+     * application traffic (protocol/connection.md). Null in unit tests that
+     * only exercise the pairing state machine.
+     */
+    private val sessions: TrustedSessionHandler? = null
 ) {
 
     /** What the UI should show. */
@@ -169,6 +176,8 @@ class PairingManager(
         if (record != null) {
             conn.trusted = record
             Log.i(TAG, "peer is trusted: ${record.name} (${record.deviceId})")
+            // Hand off to the connection layer (system.hello + heartbeats).
+            sessions?.onTrustedSession(conn)
             return
         }
         when (conn.role) {
@@ -235,7 +244,9 @@ class PairingManager(
             conn.close()
             return
         }
-        Log.i(TAG, "received ${env.type}: ${env.payload}")
+        // Trusted: the connection layer interprets system.hello/incompatible
+        // and dispatches application messages (protocol/connection.md).
+        sessions?.onTrustedMessage(conn, env)
     }
 
     private fun handlePairing(conn: Connection, env: Envelope) {
@@ -453,6 +464,9 @@ class PairingManager(
     private fun succeed(session: Pending, peer: DeviceInfo) {
         clearPending(session, close = false)
         _ui.value = Ui.Succeeded(peer.name, peer.deviceId)
+        // Freshly paired: hand the (now trusted) connection to the connection
+        // layer so the hello exchange runs without a reconnect.
+        sessions?.onTrustedSession(session.conn)
     }
 
     private fun fail(session: Pending, message: String) {
@@ -492,6 +506,8 @@ class PairingManager(
 
     /** The session ended; surface it if a pairing was in flight. */
     fun onConnectionClosed(conn: Connection, reason: String) {
+        // Tell the connection layer first: a trusted session simply went away.
+        sessions?.onTrustedClosed(conn, reason)
         val session = synchronized(lock) { pending } ?: return
         if (session.conn !== conn) return
         val name = session.peer?.name ?: "the other device"

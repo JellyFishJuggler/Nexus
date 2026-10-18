@@ -1,6 +1,6 @@
 # Nexus Clipboard Sync
 
-Status: Draft (not yet implemented)  
+Status: Implemented (Rust `nexus-core` + Tauri desktop; Android foreground-only)  
 Protocol version: 1
 
 ## Overview
@@ -80,10 +80,16 @@ Implementations MUST respect operating-system clipboard restrictions and
 MUST NOT attempt to bypass them:
 
 - **Android 10+ (API 29+):** reading the clipboard is only allowed while
-  the app has input focus; writing is similarly restricted for background
-  services. A pending feasibility spike (real device, ADB) decides what
-  Android can actually do; results are documented here and in the README
-  rather than worked around.
+  the app has input focus (or is the default IME); writes are allowed
+  regardless of focus. Nexus therefore treats Android clipboard sync as an
+  explicitly **foreground-only** feature: it reads on resume, on the
+  framework's clip-changed callback (delivered only to the focused app),
+  and on a slow poll, and it applies remote updates (writes) even while
+  backgrounded. Consequence: a copy made on the desktop reaches the phone
+  immediately, but a copy made *on the phone* is only picked up and sent
+  while Nexus is open and focused — background clipboard capture is a known
+  prototype limitation, not worked around (no AccessibilityService, root,
+  or hidden APIs).
 - **Windows:** clipboard access is allowed; use delayed rendering /
   open-clipboard failure handling (retry, never crash).
 - **Linux X11:** primary selection and clipboard are separate; Nexus syncs
@@ -93,6 +99,19 @@ When a platform cannot read or write the clipboard in the current state,
 the direction degrades (that side simply does not propagate) and the
 limitation is reported to the user — sync silently stops working, it never
 errors the connection.
+
+## Session start (initial offer)
+
+When a session becomes ready (connection.md `system.hello` exchange
+complete), both sides offer their current clipboard to the peer once. To
+make that first offer deterministic, a sender clears its `last_sent_hash`
+at session start (Rust `SyncState::reset_sent`, Android
+`SyncState.resetSent`) while keeping `last_applied_hash`. This means:
+
+- the current clipboard is sent to each newly connected peer, rather than
+  being suppressed because the same value was already sent to a previous
+  session; and
+- content that arrived *from* a peer is still never echoed back.
 
 ## Errors
 

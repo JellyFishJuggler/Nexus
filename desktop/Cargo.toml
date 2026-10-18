@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["nexus-core", "nexus-cli"]
+members = ["nexus-core", "nexus-cli", "nexus-desktop"]
 
 [workspace.package]
 version = "0.1.0"

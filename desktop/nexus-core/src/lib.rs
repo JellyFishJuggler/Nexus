@@ -35,6 +35,7 @@
 //! # }
 //! ```
 
+pub mod clipboard;
 pub mod config;
 pub mod connection;
 pub mod discovery;
@@ -47,6 +48,9 @@ pub mod session;
 pub mod tls;
 pub mod trust;
 
+pub use clipboard::{
+    text_hash, ClipboardUpdate, Inbound, Outbound, SyncState, MAX_CLIPBOARD_TEXT, MIN_SEND_INTERVAL,
+};
 pub use connection::Connection;
 pub use discovery::{Advertisement, Discovery, DiscoveryEvent, PeerInfo};
 pub use error::{Error, Result};

@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Nexus</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div id="fatal" class="fatal hidden"></div>
+
+    <header class="topbar">
+      <div class="brand">
+        <div class="logo" aria-hidden="true">
+          <span class="ring ring-a"></span>
+          <span class="ring ring-b"></span>
+        </div>
+        <div>
+          <h1>Nexus</h1>
+          <p class="tagline">Local-first companion &middot; discovery, pairing &amp; clipboard</p>
+        </div>
+      </div>
+      <div id="conn-badge" class="badge badge-offline">offline</div>
+    </header>
+
+    <main>
+      <section class="grid">
+        <article class="card" id="device-card">
+          <h2>This device</h2>
+          <dl class="kv">
+            <dt>Name</dt><dd id="d-name">&mdash;</dd>
+            <dt>Device ID</dt><dd id="d-id" class="mono">&mdash;</dd>
+            <dt>Platform</dt><dd id="d-platform">&mdash;</dd>
+            <dt>Listening port</dt><dd id="d-port">&mdash;</dd>
+            <dt>Discovery</dt><dd id="d-discovery">&mdash;</dd>
+            <dt>Data directory</dt><dd id="d-datadir" class="mono small">&mdash;</dd>
+          </dl>
+        </article>
+
+        <article class="card" id="connection-card">
+          <h2>Connection</h2>
+          <div id="conn-body" class="empty">Not connected.</div>
+          <div class="actions">
+            <button id="btn-allow" class="btn">Allow new pairing (60 s)</button>
+            <button id="btn-disconnect" class="btn btn-danger" disabled>Disconnect</button>
+          </div>
+          <p id="pairing-mode" class="hint hidden"></p>
+        </article>
+
+        <article class="card" id="clipboard-card">
+          <h2>Clipboard sync</h2>
+          <label class="switch">
+            <input type="checkbox" id="clip-toggle" />
+            <span id="clip-toggle-label">Enabled</span>
+          </label>
+          <dl class="kv">
+            <dt>Status</dt><dd id="clip-status">&mdash;</dd>
+            <dt>Last value</dt><dd id="clip-preview" class="mono small">&mdash;</dd>
+          </dl>
+          <div class="actions">
+            <button id="btn-push" class="btn">Send clipboard now</button>
+          </div>
+        </article>
+      </section>
+
+      <section class="card">
+        <h2>Discovered devices <span id="peers-count" class="count">0</span></h2>
+        <div id="peers" class="list"></div>
+      </section>
+
+      <section class="card">
+        <h2>Trusted devices <span id="trusted-count" class="count">0</span></h2>
+        <div id="trusted" class="list"></div>
+      </section>
+
+      <section class="card">
+        <h2>
+          Activity
+          <button id="btn-clear-log" class="btn btn-tiny">clear</button>
+        </h2>
+        <pre id="log" class="log"></pre>
+      </section>
+    </main>
+
+    <div id="prompt-overlay" class="overlay hidden">
+      <div class="dialog">
+        <h2 id="prompt-title">Pair with device?</h2>
+        <p class="hint">
+          Confirm this code matches the code shown on the other device.
+        </p>
+        <div id="prompt-code" class="code">000 000</div>
+        <p id="prompt-sub" class="hint"></p>
+        <div class="actions right">
+          <button id="btn-reject" class="btn btn-danger">Reject</button>
+          <button id="btn-accept" class="btn btn-primary">Accept</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="main.js"></script>
+  </body>
+</html>
