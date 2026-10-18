@@ -100,8 +100,8 @@ Automatic, no user action:
 ```
 
 Codes: `unknown_type`, `not_paired`, `incompatible`, `busy`,
-`payload_too_large`. Messages shown to users MUST be human-readable
-(error-handling style per SRS §40).
+`payload_too_large`, `invalid_payload`. Messages shown to users MUST be
+human-readable (error-handling style per SRS §40).
 
 ## Ordering & concurrency
 

@@ -45,14 +45,29 @@ class DiscoveryController(context: Context) : DiscoveryManager.Listener {
     )
 
     fun start() {
+        if (placeholderServer.isClosed) {
+            // Should not happen: the socket lives for the process lifetime.
+            _state.value = "error: listener closed"
+            return
+        }
         discovery.advertise(localPort)
         discovery.startBrowsing()
     }
 
+    /**
+     * Pause discovery (advertise + browse off) but keep the listening
+     * socket — it is owned for the whole process lifetime.
+     */
     fun stop() {
         discovery.shutdown()
-        runCatching { placeholderServer.close() }
+        _peers.value = emptyList()
         _state.value = "stopped"
+    }
+
+    /** Full teardown; only for process death paths. */
+    fun destroy() {
+        discovery.shutdown()
+        runCatching { placeholderServer.close() }
     }
 
     // DiscoveryManager.Listener (always on mainExecutor) -------------------

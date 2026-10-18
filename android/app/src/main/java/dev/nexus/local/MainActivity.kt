@@ -52,6 +52,13 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                     lifecycleOwner.lifecycle.addObserver(observer)
+                    // Composition runs after the first ON_RESUME, so the
+                    // observer would otherwise miss it on cold start.
+                    if (lifecycleOwner.lifecycle.currentState
+                            .isAtLeast(Lifecycle.State.RESUMED)
+                    ) {
+                        controller.start()
+                    }
                     onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
                 }
 
