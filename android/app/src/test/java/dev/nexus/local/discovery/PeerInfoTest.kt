@@ -19,51 +19,51 @@ class PeerInfoTest {
 
     @Test
     fun `valid record is parsed`() {
-        val peer = PeerInfo.from("Bob._nexus._tcp.local.", "192.168.1.14", 51855, attrs)
+        val peer = PeerInfo.from("Bob._nexus._tcp.local.", "192.0.2.14", 51855, attrs)
         requireNotNull(peer)
         assertEquals("3188b946-0998-44ac-85f0-ade23fb29b48", peer.deviceId)
         assertEquals("Bob", peer.name)
         assertEquals("windows", peer.platform)
         assertEquals(1, peer.protocolVersion)
-        assertEquals("192.168.1.14", peer.host)
+        assertEquals("192.0.2.14", peer.host)
         assertEquals(51855, peer.port)
     }
 
     @Test
     fun `missing pv is rejected`() {
-        assertNull(PeerInfo.from("svc", "192.168.1.14", 1, attrs - PeerInfo.KEY_PV))
+        assertNull(PeerInfo.from("svc", "192.0.2.14", 1, attrs - PeerInfo.KEY_PV))
     }
 
     @Test
     fun `missing id is rejected`() {
-        assertNull(PeerInfo.from("svc", "192.168.1.14", 1, attrs - PeerInfo.KEY_ID))
+        assertNull(PeerInfo.from("svc", "192.0.2.14", 1, attrs - PeerInfo.KEY_ID))
     }
 
     @Test
     fun `missing nm is rejected`() {
-        assertNull(PeerInfo.from("svc", "192.168.1.14", 1, attrs - PeerInfo.KEY_NM))
+        assertNull(PeerInfo.from("svc", "192.0.2.14", 1, attrs - PeerInfo.KEY_NM))
     }
 
     @Test
     fun `missing pf is rejected`() {
-        assertNull(PeerInfo.from("svc", "192.168.1.14", 1, attrs - PeerInfo.KEY_PF))
+        assertNull(PeerInfo.from("svc", "192.0.2.14", 1, attrs - PeerInfo.KEY_PF))
     }
 
     @Test
     fun `null attributes are rejected`() {
-        assertNull(PeerInfo.from("svc", "192.168.1.14", 1, null))
+        assertNull(PeerInfo.from("svc", "192.0.2.14", 1, null))
     }
 
     @Test
     fun `non numeric pv is rejected`() {
         val bad = attrs + (PeerInfo.KEY_PV to "one".toByteArray())
-        assertNull(PeerInfo.from("svc", "192.168.1.14", 1, bad))
+        assertNull(PeerInfo.from("svc", "192.0.2.14", 1, bad))
     }
 
     @Test
     fun `blank name is rejected`() {
         val bad = attrs + (PeerInfo.KEY_NM to "   ".toByteArray())
-        assertNull(PeerInfo.from("svc", "192.168.1.14", 1, bad))
+        assertNull(PeerInfo.from("svc", "192.0.2.14", 1, bad))
     }
 
     @Test
@@ -73,7 +73,7 @@ class PeerInfoTest {
 
     @Test
     fun `out of range port is rejected`() {
-        assertNull(PeerInfo.from("svc", "192.168.1.14", 0, attrs))
-        assertNull(PeerInfo.from("svc", "192.168.1.14", 65536, attrs))
+        assertNull(PeerInfo.from("svc", "192.0.2.14", 0, attrs))
+        assertNull(PeerInfo.from("svc", "192.0.2.14", 65536, attrs))
     }
 }

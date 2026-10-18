@@ -26,7 +26,7 @@ following TXT records:
 |---|---|---|---|
 | `pv` | `1` | yes | Protocol version. Integer, no prefix. |
 | `id` | `550e8400-e29b-41d4-a716-446655440000` | yes | Persistent device_id (UUID, lowercase) |
-| `nm` | `Srijan's Laptop` | yes | Human-readable device name. UTF-8, ≤ 64 bytes, no control characters. |
+| `nm` | `My Laptop` | yes | Human-readable device name. UTF-8, ≤ 64 bytes, no control characters. |
 | `pf` | `windows` | yes | One of: `windows`, `linux`, `android`, `macos` |
 
 The TCP `port` is the Nexus TLS listener port (see pairing.md). It is
@@ -35,9 +35,9 @@ carried in the SRV record, not duplicated in TXT.
 ### Example announcement
 
 ```text
-Service:  Srijan's Laptop._nexus._tcp.local.
+Service:  My Laptop._nexus._tcp.local.
 SRV:      myhost.local.:48231
-TXT:      pv=1, id=550e8400-..., nm=Srijan's Laptop, pf=windows
+TXT:      pv=1, id=550e8400-..., nm=My Laptop, pf=windows
 ```
 
 ## What MUST NOT be announced

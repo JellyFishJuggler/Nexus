@@ -1,6 +1,6 @@
 # A3 — Bluetooth-free pairing & trust (Android)
 
-Status: **verified** on the physical device (LAVA LZX415, Android 14 / API 34)
+Status: **verified** on a physical Android 14 device (API 34)
 against `nexus-cli` on Windows, per `protocol/pairing.md`.
 
 ## Scope
@@ -68,10 +68,10 @@ certificates and therefore a distinct SAS.
 
 | # | Initiator | Responder | SAS | Result |
 | --- | --- | --- | --- | --- |
-| A | Rust `rust-a` (`3edc169d`) | Android | `461 222` | Rust: `paired successfully (initiator)`; Android pinned `037189…`; both trust stores updated |
-| B | Android | Rust `rust-b` (`3255db93`) | `418 407` | Rust: `paired successfully (responder)`; Android pinned `39de4bd2…`; both trust stores updated |
-| C | Rust `rust-c` (`d2045f30`) | Android | `802 267` vs confirmed `000 000` | Android rejected (mismatch); Rust: `pairing was rejected`; no trust persisted |
-| D | Rust `rust-d` (`85ffe66a`) | Android (no pairing window) | — | Android dropped the peer (`not_paired`); Rust: `the other device isn't paired with this one` |
+| A | Rust `rust-a` | Android | matched | Rust: `paired successfully (initiator)`; both trust stores updated |
+| B | Android | Rust `rust-b` | matched | Rust: `paired successfully (responder)`; both trust stores updated |
+| C | Rust `rust-c` | Android | mismatch (operator entered a wrong code) | Android rejected (mismatch); Rust: `pairing was rejected`; no trust persisted |
+| D | Rust `rust-d` | Android (no pairing window) | — | Android dropped the peer (`not_paired`); Rust: `the other device isn't paired with this one` |
 | E | Android | Rust `rust-b` (already pinned) | — | Android: `peer is trusted`; normal session, no re-pair |
 
 Additional observed behaviours:
@@ -90,8 +90,8 @@ Android accepts intent extras for scripted runs (test-only path):
 ```
 adb shell am start -n dev.nexus.local/.MainActivity \
   --ez nexus_pairing true \
-  --es nexus_autoconfirm '461 222' \
-  --es nexus_host 192.168.1.14 --ei nexus_port 54321
+  --es nexus_autoconfirm '123 456' \
+  --es nexus_host 192.0.2.14 --ei nexus_port 54321
 ```
 
 `nexus_autoconfirm` mirrors the Rust harness' `--code`: it accepts only when

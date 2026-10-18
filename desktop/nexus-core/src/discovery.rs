@@ -267,7 +267,7 @@ mod tests {
             protocol_version: 1,
             addresses: vec![
                 "fe80::1".parse::<IpAddr>().unwrap(),
-                "192.168.1.5".parse::<IpAddr>().unwrap(),
+                "192.0.2.5".parse::<IpAddr>().unwrap(),
                 "2001:db8::1".parse::<IpAddr>().unwrap(),
             ],
             port: 1234,
@@ -276,7 +276,7 @@ mod tests {
         };
         let addrs = peer.socket_addrs();
         assert!(addrs[0].is_ipv4());
-        assert_eq!(addrs[0].ip().to_string(), "192.168.1.5");
+        assert_eq!(addrs[0].ip().to_string(), "192.0.2.5");
     }
 
     #[test]

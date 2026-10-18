@@ -1,45 +1,55 @@
 package dev.nexus.local.ui.theme
 
-import android.os.Build
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.Color
 
-private val DarkColorScheme = darkColorScheme(
-    primary = Purple80,
-    secondary = PurpleGrey80,
-    tertiary = Pink80
-)
+/**
+ * The single Nexus light colour scheme.
+ *
+ * Dynamic colour and dark mode are intentionally disabled for v0.1 so the app
+ * looks the same as the desktop companion on every device. `surfaceTint` is
+ * transparent to keep cards flat white instead of picking up tonal elevation.
+ */
+private val NexusLightColors = lightColorScheme(
+    primary = NexusCharcoal,
+    onPrimary = NexusOnCharcoal,
+    primaryContainer = NexusGreenContainer,
+    onPrimaryContainer = NexusOnGreenContainer,
 
-private val LightColorScheme = lightColorScheme(
-    primary = Purple40,
-    secondary = PurpleGrey40,
-    tertiary = Pink40
+    secondary = NexusGreen,
+    onSecondary = Color.White,
+    secondaryContainer = NexusGreenContainer,
+    onSecondaryContainer = NexusOnGreenContainer,
+
+    tertiary = NexusAmber,
+    onTertiary = Color.White,
+    tertiaryContainer = NexusAmberContainer,
+    onTertiaryContainer = NexusOnAmberContainer,
+
+    error = NexusRed,
+    onError = Color.White,
+    errorContainer = NexusRedContainer,
+    onErrorContainer = Color(0xFF410E0B),
+
+    background = NexusBackground,
+    onBackground = NexusInk,
+    surface = NexusSurface,
+    onSurface = NexusInk,
+    surfaceVariant = NexusSurfaceMuted,
+    onSurfaceVariant = NexusInkMuted,
+    outline = NexusBorder,
+    outlineVariant = NexusBorder,
+    surfaceTint = Color.Transparent,
+    inverseSurface = NexusCharcoal,
+    inverseOnSurface = NexusOnCharcoal
 )
 
 @Composable
-fun NexusTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
-    dynamicColor: Boolean = true,
-    content: @Composable () -> Unit
-) {
-    val colorScheme = when {
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            val context = LocalContext.current
-            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        }
-
-        darkTheme -> DarkColorScheme
-        else -> LightColorScheme
-    }
-
+fun NexusTheme(content: @Composable () -> Unit) {
     MaterialTheme(
-        colorScheme = colorScheme,
+        colorScheme = NexusLightColors,
         typography = Typography,
         content = content
     )

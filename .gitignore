@@ -6,6 +6,7 @@ desktop/nexus-desktop/gen/schemas/
 
 # Android
 android/local.properties
+android/keystore.properties
 android/.gradle/
 android/build/
 android/app/build/

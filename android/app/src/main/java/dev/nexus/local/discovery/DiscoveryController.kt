@@ -148,6 +148,14 @@ class DiscoveryController(context: Context) : DiscoveryManager.Listener, Connect
     fun logClipboard() = queueHarnessClipboard { clipboard.logCurrent() }
 
     /**
+     * Test harness: assert the system clipboard equals [expected], logging only
+     * the boolean result. Lets scripted tests verify exact content without ever
+     * writing clipboard contents to the log.
+     */
+    fun expectClipboard(expected: String) =
+        queueHarnessClipboard { clipboard.verifyCurrent(expected) }
+
+    /**
      * Test harness helper. `adb` can only deliver these actions by restarting
      * the activity, which happens before a session exists (and before the
      * window has clipboard-read focus). Hold the action until the session is

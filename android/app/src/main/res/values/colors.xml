@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Off-white surface, matching NexusBackground in the Compose palette. -->
+    <color name="nexus_background">#F4F5F3</color>
+</resources>

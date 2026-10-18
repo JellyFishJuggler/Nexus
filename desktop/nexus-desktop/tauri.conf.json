@@ -12,11 +12,12 @@
       {
         "label": "main",
         "title": "Nexus",
-        "width": 940,
-        "height": 760,
-        "minWidth": 700,
+        "width": 1100,
+        "height": 780,
+        "minWidth": 720,
         "minHeight": 560,
-        "resizable": true
+        "resizable": true,
+        "center": true
       }
     ],
     "security": {
@@ -24,8 +25,14 @@
     }
   },
   "bundle": {
-    "active": false,
+    "active": true,
     "targets": "all",
+    "category": "Utility",
+    "publisher": "JellyFishJuggler",
+    "copyright": "Copyright © 2026 JellyFishJuggler",
+    "shortDescription": "Connect your phone and computer over your local network.",
+    "longDescription": "Nexus is a local-first companion for your Android phone and desktop. It discovers devices on your network, pairs them with a verified short code, and keeps a direct TLS 1.3 connection so the clipboard stays in sync. No accounts, no servers, no cloud.",
+    "homepage": "https://github.com/JellyFishJuggler/Nexus",
     "icon": ["icons/icon.png", "icons/icon.ico"]
   }
 }

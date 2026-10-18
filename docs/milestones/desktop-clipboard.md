@@ -1,6 +1,6 @@
 # Desktop app + clipboard sync (v0.1)
 
-Status: **verified** on the physical device (LAVA LZX415, Android 14 / API 34)
+Status: **verified** on a physical Android 14 device (API 34)
 against the Tauri desktop app on Windows 11, per `protocol/clipboard.md` and
 `protocol/connection.md`.
 
@@ -98,14 +98,13 @@ produced with `cargo tauri build` (Tauri CLI) if a native installer is wanted.
 
 ## Live acceptance test (Windows ↔ Android)
 
-One fresh pairing between the desktop identity (`CLI-A`, `0785875c`) and the
-phone (`e040af26`, LAVA LZX415). The 6-digit SAS was `879 436`, confirmed on
-both sides.
+One fresh pairing between the desktop identity and the phone. The 6-digit SAS
+was confirmed on both sides.
 
 | # | Step | Result |
 | --- | --- | --- |
-| 1 | Discover | Desktop discovered "LAVA LZX415 (android)" via mDNS; phone advertised its TLS port. |
-| 2 | Pair / trust | `paired successfully`; both trust stores updated and the phone persisted the pin (`277b7eeb…`). |
+| 1 | Discover | Desktop discovered the phone (android) via mDNS; phone advertised its TLS port. |
+| 2 | Pair / trust | `paired successfully`; both trust stores updated and the phone persisted the pin. |
 | 3 | Secure connection | `connected — encrypted + authenticated`, `features: clipboard`; both sides exchanged `system.hello`. |
 | 4 | Windows → Android | `Set-Clipboard "windows-to-android-42"` → desktop `clipboard sent (21 bytes)` → phone `clipboard applied (21 chars)`. **Phone's actual clipboard read back: `"windows-to-android-42"`.** |
 | 5 | Android → Windows | Phone sent `"android-to-windows-777"` → desktop `clipboard updated from peer`. **Windows clipboard: `"android-to-windows-777"`.** |
@@ -161,8 +160,8 @@ Android activity extras, mirroring the A3 harness:
 ```
 adb shell am start -n dev.nexus.local/.MainActivity \
   --ez nexus_pairing true \
-  --es nexus_autoconfirm '879 436' \
-  --es nexus_host 192.168.1.14 --ei nexus_port 47821 \
+  --es nexus_autoconfirm '123 456' \
+  --es nexus_host 192.0.2.14 --ei nexus_port 47821 \
   --es nexus_set_clipboard 'android-to-windows-777' \
   --ez nexus_read_clipboard true
 ```
@@ -194,7 +193,7 @@ same identity and trust store.
   while content received *from* a peer is still never echoed back.
 - **Desktop pairing prompt** has no auto-accept flag; scripted runs establish
   trust with `nexus-cli` first (same data directory).
-- **OEM quirk** — on this LAVA/Transsion build, `adb shell am start` targeted at
+- **OEM quirk** — on this Transsion OEM build, `adb shell am start` targeted at
   an already-running instance did not deliver `onNewIntent`, so harness actions
   are applied on a fresh launch (`force-stop` then `start`).
 - **Single active session** per device, consistent with `connection.md`.

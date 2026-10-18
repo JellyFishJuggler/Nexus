@@ -39,6 +39,13 @@ const TICK: Duration = Duration::from_secs(2);
 /// How many log lines the snapshot keeps.
 const LOG_LIMIT: usize = 200;
 
+/// How many human-readable activity entries the snapshot keeps.
+const ACTIVITY_LIMIT: usize = 50;
+
+/// Two identical activity entries closer together than this are collapsed, so
+/// auto-reconnect chatter cannot flood the UI.
+const ACTIVITY_DEDUPE: Duration = Duration::from_secs(5);
+
 // ---------------------------------------------------------------------------
 // Snapshot types (serialized to the webview)
 // ---------------------------------------------------------------------------
@@ -63,6 +70,8 @@ pub struct Status {
     pub clipboard_enabled: bool,
     pub clipboard_state: String,
     pub clipboard_preview: Option<String>,
+    pub clipboard_last_at: Option<i64>,
+    pub activities: Vec<ActivityView>,
     pub log: Vec<String>,
 }
 
@@ -105,6 +114,16 @@ pub struct PromptView {
     pub peer_device_id: String,
     pub code: String,
     pub we_initiated: bool,
+}
+
+/// One user-facing activity entry (a curated view of the event log).
+#[derive(Debug, Clone, Serialize)]
+pub struct ActivityView {
+    /// Unix milliseconds, for relative timestamps in the UI.
+    pub at: i64,
+    /// "info" | "success" | "warn" | "error".
+    pub level: String,
+    pub text: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -742,7 +761,13 @@ impl Manager {
                 push_log(&mut s, format!("incoming pairing request from {addr}"));
             }
             match pair_as_responder(&node, session, shared.pairing.prompt()).await {
-                Ok(session) => complete_handshake(&node, &tx, session).await,
+                Ok(session) => {
+                    {
+                        let mut s = shared.status.lock().unwrap();
+                        push_log(&mut s, "pairing completed".to_string());
+                    }
+                    complete_handshake(&node, &tx, session).await
+                }
                 Err(e) => {
                     let _ = tx.send(Event::ConnectFailed(format!("pairing: {e}")));
                 }
@@ -927,6 +952,7 @@ impl Manager {
                 self.sync.note_applied(&hash);
                 self.status(|s| {
                     s.clipboard_state = "applied from peer".to_string();
+                    s.clipboard_last_at = Some(now_ms());
                     push_log(s, "clipboard updated from peer".to_string());
                 });
             }
@@ -954,6 +980,7 @@ impl Manager {
                                     self.sync.note_sent(&update.h);
                                     self.status(|s| {
                                         s.clipboard_preview = preview;
+                                        s.clipboard_last_at = Some(now_ms());
                                         s.clipboard_state = format!("sent {bytes} bytes to peer");
                                         push_log(s, format!("clipboard sent ({bytes} bytes)"));
                                     });
@@ -1126,11 +1153,90 @@ fn preview_of(text: &str) -> Option<String> {
 fn push_log(status: &mut Status, line: impl Into<String>) {
     let line = line.into();
     tracing::info!("{line}");
+    if let Some((level, text)) = humanize(&line) {
+        push_activity(status, level, text);
+    }
     status.log.push(line);
     let len = status.log.len();
     if len > LOG_LIMIT {
         status.log.drain(0..len - LOG_LIMIT);
     }
+}
+
+/// Current wall-clock time in Unix milliseconds.
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+/// Append a user-facing activity entry, collapsing chatter.
+fn push_activity(status: &mut Status, level: &str, text: String) {
+    let at = now_ms();
+    if let Some(last) = status.activities.last() {
+        if last.text == text && at.saturating_sub(last.at) < ACTIVITY_DEDUPE.as_millis() as i64 {
+            return;
+        }
+    }
+    status.activities.push(ActivityView {
+        at,
+        level: level.to_string(),
+        text,
+    });
+    let len = status.activities.len();
+    if len > ACTIVITY_LIMIT {
+        status.activities.drain(0..len - ACTIVITY_LIMIT);
+    }
+}
+
+/// Decide whether a log line is meaningful to a human, and how to colour it.
+///
+/// Returns `None` for developer-only noise (internal lifecycle messages, peer
+/// refreshes and clipboard echo suppression) so the activity feed stays calm.
+fn humanize(line: &str) -> Option<(&'static str, String)> {
+    if line.starts_with("manager ")
+        || line.starts_with("node ready")
+        || line.starts_with("discovery started")
+        || line.starts_with("updated ")
+        || line.contains("suppressed")
+        || line.contains("same content")
+        || line.contains("(sync disabled)")
+    {
+        return None;
+    }
+
+    let level = if line.contains("failed")
+        || line.contains("couldn't")
+        || line.contains("fatal")
+        || line.contains("rejected")
+    {
+        "error"
+    } else if line.contains("disconnected")
+        || line.contains("ended:")
+        || line.contains("unavailable")
+        || line.contains("not synced")
+        || line.contains("not currently")
+        || line.contains("incompatible")
+        || line.contains("no peer")
+        || line.contains("lost ")
+        || line.contains("blocked")
+        || line.contains("already connected")
+        || line.contains("not connected")
+    {
+        "warn"
+    } else if line.starts_with("connected to ")
+        || line.contains("clipboard sent")
+        || line.contains("clipboard updated from peer")
+        || line.contains("clipboard applied")
+        || line.contains("pairing completed")
+    {
+        "success"
+    } else {
+        "info"
+    };
+
+    Some((level, line.to_string()))
 }
 
 /// Optional CLI overrides, mirroring `nexus-cli` so tests can isolate state.

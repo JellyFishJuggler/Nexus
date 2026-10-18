@@ -1,42 +1,121 @@
 # Nexus
 
-Local-first device companion for your phone and computer: sync the clipboard,
-send files, and control media — directly between your devices over the local
-network. No accounts, no servers, no cloud.
+**Nexus is a local-first, open-source companion for connecting your Android phone and desktop.**
 
-**Status: v0.1 (in development).** Scope for v0.1:
+It finds your devices on the local network, pairs them once with a short code you
+compare on both screens, and then keeps a direct, encrypted connection between
+them — so the clipboard stays in sync. Everything happens on your own network.
+There is no account, no server and no cloud.
 
-- Clipboard sync (plain text, two-way)
-- File transfer
-- Media control
-- mDNS discovery (`_nexus._tcp`)
-- Pairing with pinned per-device certificates (TLS 1.3)
-- Automatic reconnection
+**Status: v0.1.0.** This is the first release. The scope is deliberately narrow:
+**clipboard sync over a paired local connection**, plus the discovery, pairing and
+security that make it trustworthy. Features such as file transfer and media
+control are on the [roadmap](#roadmap), not in this release.
+
+## Features
+
+- **Automatic discovery** — devices announce themselves on your LAN with mDNS
+  (`_nexus._tcp`); no IP addresses or configuration.
+- **Secure pairing** — compare a 6-digit code shown on both screens. Each
+  device's certificate is then pinned, so the connection is only ever between
+  the two devices you paired.
+- **Encrypted and authenticated** — all traffic runs over a direct TLS 1.3
+  connection between the devices.
+- **Automatic reconnection** — trusted devices reconnect on their own when
+  they are on the same network.
+- **Two-way clipboard sync** — plain text, in both directions, with loop
+  prevention so a synced value is never sent straight back.
+- **Local-first and private** — no account, no server, no cloud, no telemetry.
+  Clipboard history is never stored.
+
+## Installation
+
+### Windows
+
+Download the latest `Nexus_0.1.0_x64-setup.exe` (or `Nexus_0.1.0_x64_en-US.msi`)
+from the [Releases page](https://github.com/JellyFishJuggler/Nexus/releases) and
+run it. No Rust, Node or terminal is required.
+
+### Android
+
+Download `app-release.apk` from the
+[Releases page](https://github.com/JellyFishJuggler/Nexus/releases) and open it.
+Android will ask you to allow installing apps from this source. Nexus requires
+**Android 10 (API 29) or newer**.
+
+## Getting started
+
+1. Install Nexus on both your desktop and your phone.
+2. Put both on the same Wi-Fi network.
+3. Open Nexus on both devices.
+4. Wait a moment — each app lists the other under **Nearby devices**.
+5. On one device tap **Pair** on the other; on the other tap **Allow a new pairing**.
+6. Confirm that the **same 6-digit code** appears on both screens.
+
+That's it — the devices connect automatically from now on. The home screen shows
+which device is connected, that the connection is secure, whether clipboard sync
+is active, and the devices currently on your network.
 
 ## How it works
 
-1. Devices announce themselves on the LAN via mDNS and find each other
-   automatically — no IP addresses, no configuration.
+1. Devices announce themselves on the LAN with mDNS and find each other
+   automatically.
 2. The first connection is verified by comparing a short code shown on both
-   screens (short authentication string). After that, each device's
-   certificate is pinned; future connections only work between trusted
-   devices.
+   screens (a short authentication string). Afterwards each device's certificate
+   is pinned, and future connections only work between trusted devices.
 3. All traffic runs over a direct TCP connection encrypted with TLS 1.3.
 
-The protocol is documented in [`protocol/`](protocol/) and is the source of
-truth for both implementations.
+The protocol is documented in [`protocol/`](protocol/) and is the source of truth
+for both implementations.
+
+## Security
+
+- Nexus only talks to devices on your local network; there is no internet
+  backend and nothing is uploaded anywhere.
+- Every device has its own self-signed certificate and private key, generated
+  on the device. Private keys never leave the device.
+- A connection is only accepted between devices that have completed pairing and
+  whose certificates are pinned. An unpaired device is rejected.
+- Pairing requires you to confirm the same short code on both devices, which
+  prevents a silent man-in-the-middle during the initial pairing.
+- Nexus collects no analytics, and clipboard contents are never written to logs.
+
+If you find a security issue, please open an issue on the
+[issue tracker](https://github.com/JellyFishJuggler/Nexus/issues).
+
+## Limitations
+
+- **Android clipboard is foreground-only.** Since Android 10, only the app with
+  input focus may read the clipboard, so Nexus does not try to work around it.
+  In practice: a copy on the desktop reaches the phone immediately, but a copy
+  on the phone is only picked up and sent while Nexus is open and focused.
+- **Plain text only.** Images, files and rich text are not synced.
+- **One active connection at a time** per device.
+- **Platform support:** Windows and Linux (X11) are the primary targets.
+  Wayland and macOS are best-effort and untested. v0.1 installers are published
+  for Windows; other platforms can be built from source.
+
+## Roadmap
+
+These are **not** in v0.1:
+
+- **v0.2** — file transfer between paired devices.
+- **v0.3** — media control and notifications.
 
 ## Repository layout
 
-| Path        | Contents                                                        |
-| ----------- | --------------------------------------------------------------- |
-| `desktop/`  | Rust workspace: `nexus-core` (library) and `nexus-cli` (harness) |
-| `android/`  | Kotlin Android app (min SDK 29 / Android 10)                     |
-| `protocol/` | Protocol specifications (framing, discovery, pairing, ...)       |
+| Path        | Contents                                                            |
+| ----------- | ------------------------------------------------------------------- |
+| `desktop/`  | Rust workspace: `nexus-core` (library), `nexus-desktop` (Tauri app), `nexus-cli` (test harness) |
+| `android/`  | Kotlin/Compose Android app (min SDK 29)                             |
+| `protocol/` | Protocol specifications — the source of truth for both sides        |
+| `docs/`     | Milestone and release notes                                         |
 
-## Building
+## Building from source
 
-### Desktop (Rust)
+### Desktop
+
+Requires a recent stable Rust toolchain.
 
 ```sh
 cd desktop
@@ -44,29 +123,41 @@ cargo build --workspace
 cargo test --workspace
 ```
 
-`nexus-cli` is the development harness used to exercise the protocol:
+To build the Tauri desktop app and installers:
 
 ```sh
-# Terminal A
+cd desktop/nexus-desktop
+cargo install tauri-cli --version '^2'   # once
+cargo tauri build
+```
+
+`nexus-cli` is the development harness used to exercise the protocol without a
+GUI:
+
+```sh
+# Terminal A — advertise and browse
 nexus-cli browse
-# Terminal B
+# Terminal B — pair with the other device
 nexus-cli pair --to <device-name>
 ```
 
 ### Android
 
-Requires JDK 17 and the Android SDK (set `sdk.dir` in `android/local.properties`
-or the `ANDROID_HOME` environment variable):
+Requires JDK 17 and the Android SDK (set `sdk.dir` in
+`android/local.properties`, or the `ANDROID_HOME` environment variable).
 
 ```sh
 cd android
-gradle :app:assembleDebug
+./gradlew :app:assembleDebug
 ```
+
+Release builds are signed from `android/keystore.properties` (not committed).
+Without that file the release build is left unsigned.
 
 ## Contributing
 
-Protocol changes start in `protocol/`; code follows. Both the Rust and
-Kotlin implementations must implement the documented behavior. See
+Protocol changes start in `protocol/`; code follows. Both the Rust and Kotlin
+implementations must implement the documented behavior. See
 `.github/workflows/ci.yml` for the checks that run on every change.
 
 ## License

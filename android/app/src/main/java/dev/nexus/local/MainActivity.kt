@@ -6,19 +6,16 @@ import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -26,17 +23,19 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
-import dev.nexus.local.clipboard.ClipboardSync
 import dev.nexus.local.discovery.DiscoveryController
-import dev.nexus.local.discovery.PeerInfo
 import dev.nexus.local.pairing.PairingManager
-import dev.nexus.local.trust.TrustedDevice
+import dev.nexus.local.ui.NexusScreen
+import dev.nexus.local.ui.theme.NexusRed
 import dev.nexus.local.ui.theme.NexusTheme
 
 class MainActivity : ComponentActivity() {
@@ -78,7 +77,7 @@ class MainActivity : ComponentActivity() {
                     onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
                 }
 
-                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
+                Scaffold(modifier = Modifier.fillMaxWidth()) { innerPadding ->
                     NexusScreen(
                         state = state,
                         port = controller.localPort,
@@ -113,33 +112,42 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Test-harness triggers, mirroring the Rust CLI's flags so scripted
-     * runs can drive the same code paths the UI buttons use:
+     * Test-harness triggers, mirroring the Rust CLI's flags so scripted runs
+     * can drive the same code paths the UI buttons use:
      *
      * - `--ez nexus_pairing true`      open the pairing window (responder)
      * - `--es nexus_autoconfirm CODE`  auto-accept when the code matches
      * - `--es nexus_host H --ei nexus_port P`  connect and pair (initiator)
      * - `--es nexus_set_clipboard S`   simulate a local copy of `S` and send it
-     * - `--ez nexus_read_clipboard true`  log the current system clipboard
+     * - `--ez nexus_read_clipboard true`  report the current system clipboard
+     * - `--es nexus_expect_clipboard S`   assert the clipboard equals `S`
+     *
+     * These hooks exist **only in debug builds** (`BuildConfig.DEBUG`). A
+     * release build ignores the extras entirely, so another app cannot use
+     * them to auto-accept a pairing or dial out on the user's behalf.
      */
     private fun handleHarnessIntent(intent: Intent?) {
         if (intent == null) return
+        if (!BuildConfig.DEBUG) return
+
         val pairing = intent.getBooleanExtra(EXTRA_PAIRING, false)
         val auto = intent.getStringExtra(EXTRA_AUTOCONFIRM)
         val host = intent.getStringExtra(EXTRA_HOST)
         val port = intent.getIntExtra(EXTRA_PORT, -1)
         val clip = intent.getStringExtra(EXTRA_SET_CLIPBOARD)
         val readClip = intent.getBooleanExtra(EXTRA_READ_CLIPBOARD, false)
+        val expectClip = intent.getStringExtra(EXTRA_EXPECT_CLIPBOARD)
+        // Never log clipboard contents — only the size of the harness payload.
         Log.i(
             "NexusHarness",
             "intent extras: pairing=$pairing autoconfirm=$auto host=$host port=$port " +
-                "clip=$clip readClip=$readClip"
+                "clipLen=${clip?.length ?: 0} readClip=$readClip expectClip=${expectClip != null}"
         )
 
         // Some devices redeliver the launch intent several times. Ignore exact
         // repeats so the harness (a test-only path) does not open the pairing
         // window, or dial out, more than once per launch.
-        val signature = "p=$pairing;a=$auto;h=$host;o=$port;c=$clip;r=$readClip"
+        val signature = "p=$pairing;a=$auto;h=$host;o=$port;c=$clip;r=$readClip;e=$expectClip"
         if (signature == lastHarnessSignature) {
             Log.i("NexusHarness", "duplicate harness intent ignored")
             return
@@ -153,6 +161,7 @@ class MainActivity : ComponentActivity() {
         }
         clip?.let { controller.setLocalClipboard(it) }
         if (readClip) controller.logClipboard()
+        expectClip?.let { controller.expectClipboard(it) }
     }
 
     companion object {
@@ -162,6 +171,7 @@ class MainActivity : ComponentActivity() {
         private const val EXTRA_AUTOCONFIRM = "nexus_autoconfirm"
         private const val EXTRA_SET_CLIPBOARD = "nexus_set_clipboard"
         private const val EXTRA_READ_CLIPBOARD = "nexus_read_clipboard"
+        private const val EXTRA_EXPECT_CLIPBOARD = "nexus_expect_clipboard"
 
         /** Process-wide so activity re-creation does not re-run the harness. */
         @Volatile
@@ -177,30 +187,52 @@ fun PairingPrompt(ui: PairingManager.Ui, controller: DiscoveryController) {
             onDismissRequest = { /* must be decided explicitly */ },
             title = { Text("Pair with ${ui.peerName}?") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Verification code", style = MaterialTheme.typography.labelMedium)
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
-                        text = ui.code,
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontFamily = FontFamily.Monospace
+                        text = "Confirm this code matches the one shown on " +
+                            "${ui.peerName}.",
+                        style = MaterialTheme.typography.bodyMedium
                     )
-                    Text("Confirm this matches the other device.")
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(MaterialTheme.colorScheme.primaryContainer)
+                            .padding(vertical = 14.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = ui.code,
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    }
+                    Text(
+                        text = "If the codes differ, reject — someone may be trying to " +
+                            "intercept the connection.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             },
             confirmButton = {
                 Button(onClick = { controller.acceptPairing() }) { Text("Accept") }
             },
             dismissButton = {
-                TextButton(onClick = { controller.rejectPairing() }) { Text("Reject") }
+                TextButton(onClick = { controller.rejectPairing() }) {
+                    Text("Reject", color = NexusRed)
+                }
             }
         )
 
         is PairingManager.Ui.Succeeded -> AlertDialog(
             onDismissRequest = { controller.clearPairingUi() },
             title = { Text("Paired") },
-            text = { Text("${ui.peerName} is now trusted.") },
+            text = { Text("${ui.peerName} is now trusted and will reconnect automatically.") },
             confirmButton = {
-                Button(onClick = { controller.clearPairingUi() }) { Text("OK") }
+                Button(onClick = { controller.clearPairingUi() }) { Text("Done") }
             }
         )
 
@@ -214,156 +246,5 @@ fun PairingPrompt(ui: PairingManager.Ui, controller: DiscoveryController) {
         )
 
         PairingManager.Ui.Idle -> Unit
-    }
-}
-
-@Composable
-fun NexusScreen(
-    state: String,
-    port: Int,
-    identity: dev.nexus.local.identity.DeviceIdentity,
-    peers: List<PeerInfo>,
-    trusted: List<TrustedDevice>,
-    pairingMode: Boolean,
-    session: DiscoveryController.SessionUi,
-    clipboard: ClipboardSync.Status,
-    onStartPairingMode: () -> Unit,
-    onPairPeer: (PeerInfo) -> Unit,
-    onUnpair: (String) -> Unit,
-    onPushClipboard: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    LazyColumn(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(text = "Nexus", style = MaterialTheme.typography.headlineMedium)
-                Text(
-                    text = "This device: ${identity.name} (${identity.platform})\n" +
-                        "Device ID: ${identity.deviceId}\n" +
-                        "Advertising port: $port — state: $state",
-                    style = MaterialTheme.typography.bodySmall
-                )
-            }
-        }
-
-        item {
-            ConnectionCard(session = session, clipboard = clipboard, onPushClipboard = onPushClipboard)
-        }
-
-        item {
-            Button(onClick = onStartPairingMode) {
-                Text(if (pairingMode) "Pairing mode: on (60 s)" else "Allow a new pairing")
-            }
-        }
-
-        item {
-            Text(
-                text = "Trusted devices (${trusted.size})",
-                style = MaterialTheme.typography.titleMedium
-            )
-        }
-        if (trusted.isEmpty()) {
-            item {
-                Text(
-                    text = "No devices paired yet.",
-                    style = MaterialTheme.typography.bodySmall
-                )
-            }
-        } else {
-            items(trusted, key = { it.deviceId }) { device ->
-                TrustedCard(device, onUnpair)
-            }
-        }
-
-        item {
-            Text(
-                text = "Discovered peers (${peers.size})",
-                style = MaterialTheme.typography.titleMedium
-            )
-        }
-        items(peers, key = { it.serviceName }) { peer ->
-            PeerCard(peer, onPairPeer)
-        }
-    }
-}
-
-@Composable
-fun ConnectionCard(
-    session: DiscoveryController.SessionUi,
-    clipboard: ClipboardSync.Status,
-    onPushClipboard: () -> Unit
-) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            Text(text = "Connection", style = MaterialTheme.typography.titleSmall)
-            Text(
-                text = if (session.ready) {
-                    "Connected to ${session.peerName ?: "a trusted device"}"
-                } else {
-                    "Not connected — a paired device will reconnect automatically."
-                },
-                style = MaterialTheme.typography.bodySmall
-            )
-            Text(
-                text = buildString {
-                    append("Clipboard: ")
-                    append(if (clipboard.connected) "linked" else "no session")
-                    append(if (clipboard.active) " · watching" else " · paused")
-                    clipboard.lastDirection?.let { append(" · last $it") }
-                },
-                style = MaterialTheme.typography.bodySmall
-            )
-            clipboard.lastPreview?.let {
-                Text(text = "“$it”", style = MaterialTheme.typography.bodySmall)
-            }
-            Text(text = clipboard.note, style = MaterialTheme.typography.labelSmall)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(
-                    onClick = onPushClipboard,
-                    enabled = clipboard.connected && clipboard.active
-                ) { Text("Send clipboard now") }
-            }
-        }
-    }
-}
-
-@Composable
-fun PeerCard(peer: PeerInfo, onPair: (PeerInfo) -> Unit) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Text(text = peer.name, style = MaterialTheme.typography.titleSmall)
-            Text(
-                text = "${peer.platform} · pv=${peer.protocolVersion}\n" +
-                    "${peer.host}:${peer.port}\n${peer.deviceId}",
-                style = MaterialTheme.typography.bodySmall
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { onPair(peer) }) { Text("Pair") }
-            }
-        }
-    }
-}
-
-@Composable
-fun TrustedCard(device: TrustedDevice, onUnpair: (String) -> Unit) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Text(text = device.name, style = MaterialTheme.typography.titleSmall)
-            Text(
-                text = "${device.platform} · paired\n${device.deviceId}",
-                style = MaterialTheme.typography.bodySmall
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = { onUnpair(device.deviceId) }) { Text("Unpair") }
-            }
-        }
     }
 }

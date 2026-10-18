@@ -14,7 +14,7 @@ class DeviceInfoTest {
 
     private val sample = DeviceInfo(
         deviceId = "6f1e0a5e-2a1b-4c3d-8e9f-0123456789ab",
-        name = "LAVA LZX415",
+        name = "Test Phone",
         platform = "android",
         pv = 1,
         features = listOf("clipboard")

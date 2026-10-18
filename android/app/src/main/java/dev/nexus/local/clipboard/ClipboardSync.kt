@@ -152,13 +152,33 @@ class ClipboardSync(
     }
 
     /**
-     * Test harness only: log what is actually on the system clipboard now, so
-     * a scripted test can assert the applied content (adb cannot read it).
+     * Test harness only: report what is on the system clipboard so a scripted
+     * test can assert that the applied content is present (adb cannot read the
+     * clipboard on Android 10+).
+     *
+     * Only a character count is logged — clipboard contents are never written
+     * to the log.
      */
     fun logCurrent() {
         executor.execute {
             val text = readClipboardText()
-            Log.i(TAG, "clipboard current: ${text?.let { "\"$it\"" } ?: "<empty/unreadable>"}")
+            Log.i(
+                TAG,
+                if (text == null) "clipboard current: <empty/unreadable>"
+                else "clipboard current: ${text.length} chars"
+            )
+        }
+    }
+
+    /**
+     * Test harness only: assert that [expected] is exactly what the system
+     * clipboard currently holds, and log only the boolean result. Used by
+     * scripted acceptance tests so clipboard contents never reach the log.
+     */
+    fun verifyCurrent(expected: String) {
+        executor.execute {
+            val match = readClipboardText() == expected
+            Log.i(TAG, "clipboard check: matched=$match")
         }
     }
 

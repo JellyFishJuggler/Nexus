@@ -158,7 +158,7 @@ Confirm this matches the other device.
   "type": "pairing.request",
   "payload": {
     "device_id": "550e8400-e29b-41d4-a716-446655440000",
-    "name": "Srijan's Laptop",
+    "name": "My Laptop",
     "platform": "windows",
     "pv": 1
   }
@@ -204,7 +204,7 @@ Persisted per installation, user-only permission:
   "devices": [
     {
       "device_id": "550e8400-e29b-41d4-a716-446655440000",
-      "name": "Srijan's Phone",
+      "name": "My Phone",
       "platform": "android",
       "cert_sha256": "hex…",
       "cert_pem": "-----BEGIN CERTIFICATE-----…",

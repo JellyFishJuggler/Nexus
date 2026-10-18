@@ -17,7 +17,7 @@
 //! nexus-cli pair            # terminal 2: accept the incoming request
 //!
 //! # reconnect to a paired device
-//! nexus-cli connect "Srijan's Phone"
+//! nexus-cli connect "My Phone"
 //! ```
 
 mod commands;

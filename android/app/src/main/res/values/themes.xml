@@ -1,4 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.Nexus" parent="android:Theme.Material.Light.NoActionBar" />
+    <!--
+        Nexus is a light-only app for v0.1 (matching the desktop companion).
+        The window background matches the Compose surface colour so there is no
+        flash of a different colour during launch, even when the system is in
+        dark mode.
+    -->
+    <style name="Theme.Nexus" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/nexus_background</item>
+    </style>
 </resources>
