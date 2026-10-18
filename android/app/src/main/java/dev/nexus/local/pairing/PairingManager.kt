@@ -104,6 +104,16 @@ class PairingManager(
     private val scheduler = Executors.newSingleThreadScheduledExecutor { runnable ->
         Thread(runnable, "nexus-pairing-timer").apply { isDaemon = true }
     }
+
+    /**
+     * User decisions ([accept]/[reject]) write to the TLS socket, and they are
+     * invoked from the Compose main thread — where Android forbids network I/O
+     * (non-debuggable builds throw `NetworkOnMainThreadException`). The writes
+     * therefore run here, mirroring `ClipboardSync.pushNow`.
+     */
+    private val io = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "nexus-pairing-io").apply { isDaemon = true }
+    }
     private val generation = AtomicLong(0)
 
     private var pending: Pending? = null
@@ -380,8 +390,15 @@ class PairingManager(
 
     // -- User decisions ---------------------------------------------------
 
-    /** The user confirmed the displayed code matches. */
-    fun accept() {
+    /**
+     * The user confirmed the displayed code matches.
+     *
+     * The socket write runs on [io], never on the caller's thread: this is
+     * reached from the Compose main thread, where network I/O would throw.
+     */
+    fun accept() = io.execute { acceptNow() }
+
+    private fun acceptNow() {
         val session = synchronized(lock) { pending } ?: return
         when (session.stage) {
             Stage.AWAITING_DECISION -> {
@@ -390,7 +407,7 @@ class PairingManager(
                     synchronized(lock) { session.stage = Stage.AWAITING_CONFIRM }
                     val sent = runCatching {
                         session.conn.send(Envelope.create("pairing.accept", ourDeviceInfo().toJson()))
-                    }.isSuccess
+                    }.onFailure { Log.w(TAG, "couldn't send pairing.accept: $it") }.isSuccess
                     if (!sent) fail(session, "couldn't send the pairing acceptance")
                     else armTimeout(session)
                 } else {
@@ -398,7 +415,7 @@ class PairingManager(
                     synchronized(lock) { session.stage = Stage.AWAITING_COMPLETE }
                     val sent = runCatching {
                         session.conn.send(Envelope.create("pairing.confirm"))
-                    }.isSuccess
+                    }.onFailure { Log.w(TAG, "couldn't send pairing.confirm: $it") }.isSuccess
                     if (!sent) fail(session, "couldn't send the pairing confirmation")
                     else armTimeout(session)
                 }
@@ -408,7 +425,9 @@ class PairingManager(
     }
 
     /** The user declined, or the codes did not match. */
-    fun reject() {
+    fun reject() = io.execute { rejectNow() }
+
+    private fun rejectNow() {
         val session = synchronized(lock) { pending } ?: return
         val peerId = session.peer?.deviceId
         val name = session.peer?.name ?: "the other device"
@@ -418,6 +437,7 @@ class PairingManager(
             synchronized(lock) { rejectedDeviceIds += peerId }
         }
         runCatching { session.conn.send(Envelope.create("pairing.reject")) }
+            .onFailure { Log.w(TAG, "couldn't send pairing.reject: $it") }
         clearPending(session, close = true)
         _ui.value = Ui.Failed("pairing with $name was rejected")
     }
