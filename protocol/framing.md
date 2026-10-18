@@ -1,6 +1,6 @@
 # Nexus Framing
 
-Status: Implemented (Rust)  
+Status: Implemented (Rust; Android frame codec + envelope + session loop implemented)  
 Protocol version: 1
 
 ## Transport

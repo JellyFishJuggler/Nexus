@@ -1,6 +1,6 @@
 # Nexus Pairing & Secure Channel
 
-Status: Implemented (Rust)  
+Status: Implemented (Rust; Android TLS 1.3 channel + pairing-request reception implemented, pairing flow pending)  
 Protocol version: 1
 
 ## Overview
@@ -19,7 +19,9 @@ Each installation generates, on first run:
 
 - An **ECDSA P-256** key pair (PKCS#8)
 - A self-signed X.509 certificate for that key (CN = device_id, 10-year
-  validity, SKI/AKI extensions)
+  validity, EKU serverAuth + clientAuth). SKI/AKI are optional and are
+  not currently emitted by either implementation; no extension is
+  validated, since chain validity is deliberately never checked.
 - A random device UUID (`device_id`)
 
 Stored with user-only read permission. The private key never leaves the

@@ -85,7 +85,7 @@ class DiscoveryController(context: Context) :
                 socket.soTimeout = Connection.READ_TIMEOUT_MS
                 val conn = Connection(socket, Tls.peerFingerprint(socket), this)
                 conn.start()
-                Log.i(TAG, "client session established: $conn.peerDescription")
+                Log.i(TAG, "client session established: ${conn.peerDescription}")
             } catch (e: Exception) {
                 Log.w(TAG, "connect to $host:$port failed: $e")
             }
