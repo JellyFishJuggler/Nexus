@@ -9,6 +9,11 @@ import javax.net.ssl.SSLSocket
 /**
  * This device's TLS server (protocol/pairing.md § Connection roles):
  * mutual TLS on the advertised port, one active session per connection.md.
+ *
+ * Trust policy is applied by the [Connection.Listener] (see
+ * `PairingManager.onEstablished`): untrusted peers are kept only while the
+ * pairing window is open, and dropped with `system.error {code:"not_paired"}`
+ * otherwise.
  */
 class NexusServer(
     identity: NexusTlsIdentity,
@@ -55,10 +60,9 @@ class NexusServer(
                 socket.soTimeout = Connection.READ_TIMEOUT_MS
                 Tls.applyAcceptedParameters(socket)
                 socket.startHandshake() // mutual TLS: client cert required
-                val fingerprint = Tls.peerFingerprint(socket)
-                Log.i(TAG, "peer connected from ${socket.inetAddress?.hostAddress} $fingerprint")
+                val conn = Connection(socket, Connection.Role.SERVER, listener)
+                Log.i(TAG, "peer connected from ${socket.inetAddress?.hostAddress} ${conn.peerDescription}")
 
-                val conn = Connection(socket, fingerprint, listener)
                 val current = active
                 if (current != null && !current.closed) {
                     // connection.md: older connection wins, the newer one is

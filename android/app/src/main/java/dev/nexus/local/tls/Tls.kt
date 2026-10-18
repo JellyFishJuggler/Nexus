@@ -93,17 +93,45 @@ object Tls {
     }
 
     /** SHA-256 fingerprint (lowercase hex) of the peer's leaf certificate. */
-    fun peerFingerprint(socket: SSLSocket): String? = try {
-        val peer = socket.session.peerCertificates.firstOrNull() as? X509Certificate
-        peer?.let { sha256Hex(it.encoded) }
+    fun peerFingerprint(socket: SSLSocket): String? =
+        peerCertificate(socket)?.let { sha256Hex(it.encoded) }
+
+    /** The peer's leaf certificate as presented during the handshake. */
+    fun peerCertificate(socket: SSLSocket): X509Certificate? = try {
+        socket.session.peerCertificates.firstOrNull() as? X509Certificate
     } catch (e: SSLPeerUnverifiedException) {
         null
     }
+
+    /** SHA-256 fingerprint (lowercase hex) of the peer's leaf certificate. */
+    fun peerFingerprintOf(certificate: X509Certificate?): String? =
+        certificate?.let { sha256Hex(it.encoded) }
 
     fun sha256Hex(bytes: ByteArray): String =
         MessageDigest.getInstance("SHA-256")
             .digest(bytes)
             .joinToString("") { "%02x".format(it) }
+
+    /**
+     * Encode DER bytes as PEM exactly like the Rust `der_to_pem`:
+     * base64, 64 characters per line, trailing newline after the footer.
+     * (`Base64.getMimeEncoder` would use CRLF, so it is not used here.)
+     */
+    fun toPem(certificate: X509Certificate): String {
+        val base64 = android.util.Base64.encodeToString(
+            certificate.encoded,
+            android.util.Base64.NO_WRAP
+        )
+        val body = buildString {
+            var index = 0
+            while (index < base64.length) {
+                append(base64, index, minOf(index + 64, base64.length))
+                append('\n')
+                index += 64
+            }
+        }
+        return "-----BEGIN CERTIFICATE-----\n$body" + "-----END CERTIFICATE-----\n"
+    }
 
     // ---------------------------------------------------------------------
 
@@ -118,12 +146,18 @@ object Tls {
 
     private fun describePeer(socket: SSLSocket): String =
         peerFingerprint(socket)?.let { "sha256=$it" } ?: "no-peer-cert"
-
     /**
      * Accepts any certificate at the TLS layer; pinning happens afterwards
      * at the application layer (trust store comparison), exactly like the
-     * Rust implementation.
+     * Rust implementation (which uses a permissive rustls verifier).
+     *
+     * Lint's `CustomX509TrustManager` warning is suppressed on purpose: chain
+     * validation is meaningless for self-signed device certificates. The
+     * security property we rely on is the pinned fingerprint checked against
+     * the trust store before any application message is processed. See
+     * `protocol/pairing.md` § "TLS profile".
      */
+    @Suppress("CustomX509TrustManager")
     class PermissiveTrustManager : X509TrustManager {
         override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) = Unit
         override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) = Unit

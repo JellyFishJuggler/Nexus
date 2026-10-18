@@ -1,6 +1,6 @@
 # Nexus Pairing & Secure Channel
 
-Status: Implemented (Rust; Android TLS 1.3 channel + pairing-request reception implemented, pairing flow pending)  
+Status: Implemented (Rust; Android pairing flow, trust store, and pinning implemented)  
 Protocol version: 1
 
 ## Overview
@@ -92,15 +92,27 @@ Initiator                                    Responder
     │                                            │
     │──── pairing.request ──────────────────────▶│
     │     {device_id, name, platform, pv}        │  shows prompt:
-    │                                            │  "Pair with X? Code 482913"
-    │◀─── pairing.accept ────────────────────────│  [Accept] [Reject]
+    │                                            │  "Pair with X? Code 482 913"
+    │                                            │  [Accept] [Reject]
+    │◀─── pairing.accept ────────────────────────│
     │     {device_id, name, platform, pv}        │
-    │                                            │
-    │  both sides: pin peer cert, state=TRUSTED  │
-    │                                            │
-    │──── pairing.complete ─────────────────────▶│
+    │  shows prompt (same SAS)                   │
+    │  [Accept] [Reject]                         │
+    │──── pairing.confirm ──────────────────────▶│
+    │     both sides: pin peer cert, TRUSTED     │
     │◀─── pairing.complete ──────────────────────│
 ```
+
+The `pairing.confirm` step is what makes the flow symmetric: each
+side pins only after the *other* side's user has also accepted, so no
+device trusts a peer that has not yet confirmed. Concretely:
+
+- Responder: on `pairing.request`, ask the user. On acceptance send
+  `pairing.accept`, then wait for `pairing.confirm`; on receipt, pin the
+  peer certificate and send `pairing.complete`.
+- Initiator: on `pairing.accept`, ask the user. On acceptance send
+  `pairing.confirm`, then wait for `pairing.complete`; on receipt, pin
+  the peer certificate.
 
 - `pairing.reject` from either side ends the connection; the rejecting
   side marks the peer `REJECTED` (no re-nag until pairing is explicitly
@@ -157,6 +169,15 @@ Confirm this matches the other device.
 
 Same payload shape as `pairing.request`. Carries the responder's identity
 so the initiator can display it.
+
+### `pairing.confirm` (initiator → responder)
+
+```json
+{ "type": "pairing.confirm", "payload": {} }
+```
+
+Sent by the initiator once its user has accepted. The responder then pins
+the peer certificate and replies with `pairing.complete`.
 
 ### `pairing.reject` (either direction)
 

@@ -155,17 +155,7 @@ impl Identity {
     /// Order-independent: both sides sort the two certificates by raw bytes,
     /// so both derive the same code. See `protocol/pairing.md`.
     pub fn sas_code(&self, peer_cert_der: &[u8]) -> String {
-        let mut first = self.cert_der.as_ref().to_vec();
-        let mut second = peer_cert_der.to_vec();
-        if first > second {
-            std::mem::swap(&mut first, &mut second);
-        }
-        let mut hasher = Sha256::new();
-        hasher.update(&first);
-        hasher.update(&second);
-        let digest = hasher.finalize();
-        let value = u32::from_be_bytes([digest[0], digest[1], digest[2], digest[3]]) % 1_000_000;
-        format!("{:03} {:03}", value / 1000, value % 1000)
+        sas_code_of(self.cert_der.as_ref(), peer_cert_der)
     }
 
     /// Identity as exchanged over the wire.
@@ -188,6 +178,23 @@ impl Identity {
             dir.join(KEY_FILE),
         ]
     }
+}
+
+/// Six-digit SAS over two certificates, order-independent.
+///
+/// `protocol/pairing.md` § "SAS verification code":
+/// `SHA-256(min(der) || max(der))`, first 4 bytes big-endian `% 1_000_000`,
+/// rendered as `"%03d %03d"`. Split out from [`Identity::sas_code`] so the
+/// algorithm can be pinned against a fixed vector that the Android
+/// implementation mirrors byte for byte.
+pub fn sas_code_of(a: &[u8], b: &[u8]) -> String {
+    let (first, second) = if a <= b { (a, b) } else { (b, a) };
+    let mut hasher = Sha256::new();
+    hasher.update(first);
+    hasher.update(second);
+    let digest = hasher.finalize();
+    let value = u32::from_be_bytes([digest[0], digest[1], digest[2], digest[3]]) % 1_000_000;
+    format!("{:03} {:03}", value / 1000, value % 1000)
 }
 
 struct CertBundle {
@@ -279,5 +286,20 @@ mod tests {
             a.sas_code(b.cert_der.as_ref()),
             a.sas_code(c.cert_der.as_ref())
         );
+    }
+
+    #[test]
+    fn sas_golden_vector() {
+        // Fixed vector mirrored byte-for-byte by the Android `SasTest`.
+        // Includes bytes > 0x7f so a signed (rather than unsigned) byte
+        // comparison in either implementation would produce a different
+        // code; the arrays also differ in length to exercise the tiebreak.
+        let a = [0x30u8, 0xff, 0x01, 0x80];
+        let b = [0x30u8, 0x7f, 0x10, 0x80, 0x00];
+        let code = sas_code_of(&a, &b);
+        // Order-independent.
+        assert_eq!(code, sas_code_of(&b, &a));
+        assert_eq!(code.len(), 7);
+        assert_eq!(code, "022 451");
     }
 }
