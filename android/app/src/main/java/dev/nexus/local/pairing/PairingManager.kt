@@ -21,6 +21,40 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 
 /**
+ * What the pairing engine may do about a fresh prompt **without the user**.
+ *
+ * The only non-interactive path is the adb harness, which is DEBUG-only and
+ * must be told the exact code in advance (`PairingManager.autoAcceptCode`).
+ * With no code configured the engine has no authority to move the exchange
+ * forward, so an incoming `pairing.request` may never reach
+ * `pairing.accept` until the user acts (`protocol/pairing.md`).
+ */
+internal sealed interface AutoPairingDecision {
+    /** Show the prompt and wait for the user. Persists no trust. */
+    data object AskUser : AutoPairingDecision
+
+    /** Harness only: the configured code matched the displayed code. */
+    data object Accept : AutoPairingDecision
+
+    /** Harness only: a code was configured and did not match. */
+    data object Reject : AutoPairingDecision
+}
+
+/**
+ * The single gate between an incoming request and `pairing.accept`.
+ *
+ * Kept pure so the invariant "no configured code ⇒ always ask the user"
+ * is provable by a unit test ([dev.nexus.local.pairing.PairingAutoDecisionTest])
+ * rather than only by inspecting call sites.
+ */
+internal fun autoPairingDecision(code: String, configuredCode: String?): AutoPairingDecision =
+    when {
+        configuredCode == null -> AutoPairingDecision.AskUser
+        configuredCode == code -> AutoPairingDecision.Accept
+        else -> AutoPairingDecision.Reject
+    }
+
+/**
  * Pairing state machine — `protocol/pairing.md` § "Pairing flow".
  *
  * Implements both roles against the same wire sequence the Rust core uses
@@ -179,7 +213,9 @@ class PairingManager(
      * Server: trusted ⇒ normal session; untrusted ⇒ keep only if the pairing
      * window is open, otherwise drop with `not_paired`.
      * Client: trusted ⇒ normal session (pin already matched); untrusted ⇒ we
-     * are the initiator and start the pairing handshake.
+     * are the initiator and start the pairing handshake — unless this is an
+     * automatic reconnect dial, which drops with `not_paired` instead of
+     * pairing (see [Connection.reconnectOnly]).
      */
     fun onEstablished(conn: Connection) {
         val record = trustedByFingerprint(conn.peerFingerprint)
@@ -203,7 +239,21 @@ class PairingManager(
                     conn.close()
                 }
             }
-            Connection.Role.CLIENT -> beginInitiator(conn)
+            Connection.Role.CLIENT -> {
+                if (conn.reconnectOnly) {
+                    // Automatic reconnect to a peer whose certificate is not
+                    // pinned any more (reinstalled, rotated, or a different
+                    // device): fail closed. Never pair from a reconnect.
+                    Log.w(TAG, "auto-reconnect found no matching pin; dropping without pairing")
+                    conn.sendSystemError(
+                        "not_paired",
+                        "this device isn't paired with Nexus on the other side yet"
+                    )
+                    conn.close()
+                } else {
+                    beginInitiator(conn)
+                }
+            }
         }
     }
 
@@ -452,18 +502,19 @@ class PairingManager(
             "verification code ${code} for ${peer.name} (${peer.deviceId}); " +
                 "we_initiated=${session.weInitiated}"
         )
-        val auto = autoAcceptCode
-        if (auto != null) {
+        when (autoPairingDecision(code, autoAcceptCode)) {
             // Non-interactive harness, mirrors the Rust `auto_accept` prompt.
-            if (code == auto) accept() else reject()
-            return
+            AutoPairingDecision.Accept -> accept()
+            AutoPairingDecision.Reject -> reject()
+            // The normal path: surface the prompt and stop. Nothing is trusted
+            // and no frame is sent until the user calls accept()/reject().
+            AutoPairingDecision.AskUser -> _ui.value = Ui.Prompt(
+                peerName = peer.name,
+                peerDeviceId = peer.deviceId,
+                code = code,
+                weInitiated = session.weInitiated
+            )
         }
-        _ui.value = Ui.Prompt(
-            peerName = peer.name,
-            peerDeviceId = peer.deviceId,
-            code = code,
-            weInitiated = session.weInitiated
-        )
     }
 
     private fun pin(session: Pending, peer: DeviceInfo) {

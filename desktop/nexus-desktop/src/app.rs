@@ -500,7 +500,14 @@ impl Manager {
             Event::Command(command) => self.handle_command(command).await,
             Event::Discovery(event) => self.handle_discovery(event),
             Event::Inbound { session, addr } => self.handle_inbound(session, addr),
-            Event::Connected(conn) => self.adopt(*conn),
+            Event::Connected(conn) => {
+                // A pairing that just completed has already been written to
+                // the node's trust store; mirror it into the snapshot so the
+                // trusted list and the dial loop see the new device without
+                // an app restart.
+                self.refresh_trusted().await;
+                self.adopt(*conn)
+            }
             Event::ConnectFailed(reason) => {
                 self.connecting = None;
                 self.status(|s| push_log(s, format!("connection failed: {reason}")));

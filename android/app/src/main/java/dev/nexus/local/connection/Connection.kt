@@ -27,7 +27,18 @@ class Connection(
     private val socket: SSLSocket,
     /** Which side of the TCP connection this is (pairing.md § Connection roles). */
     val role: Role,
-    private val listener: Listener
+    private val listener: Listener,
+    /**
+     * Automatic reconnect dial to a device this installation has **already**
+     * paired with (initiator role only).
+     *
+     * It is strictly narrower than a user-initiated dial: if the peer turns
+     * out not to match the pinned certificate, the connection is dropped
+     * fail-closed instead of starting a pairing handshake, so reconnection can
+     * never turn into pairing — no prompt, no SAS, no trust — and a device
+     * with a changed identity must be paired again through the normal flow.
+     */
+    val reconnectOnly: Boolean = false
 ) : Closeable {
 
     /** Which side of the TCP connection this session is. */

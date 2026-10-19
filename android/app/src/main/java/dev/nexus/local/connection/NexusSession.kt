@@ -71,11 +71,20 @@ class NexusSession(
 
     override fun onTrustedSession(conn: Connection) {
         // A new trusted session supersedes any previous one.
-        synchronized(lock) {
+        val previous = synchronized(lock) {
             cancelTimersLocked()
+            val old = this.conn
             this.conn = conn
             this.peer = null
             this.stage = Stage.EXPECTING_HELLO
+            old
+        }
+        // Only one session may be live at a time. Both devices reconnect after
+        // a drop, so their dials can cross; the losing connection is closed
+        // here rather than left open to be silently ignored.
+        if (previous != null && previous !== conn) {
+            Log.i(TAG, "superseding the previous session")
+            previous.close()
         }
 
         // Both sides send hello concurrently, immediately after TLS + pairing.

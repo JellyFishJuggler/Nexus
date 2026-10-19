@@ -3,6 +3,7 @@ package dev.nexus.local.discovery
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import dev.nexus.local.clipboard.ClipboardProtocol
 import dev.nexus.local.clipboard.ClipboardSync
@@ -39,6 +40,22 @@ class DiscoveryController(context: Context) : DiscoveryManager.Listener, Connect
         val peerDeviceId: String? = null
     )
 
+    /**
+     * State of the automatic reconnection to an already-trusted device
+     * (pairing.md § Trust states). The UI uses it to say what is actually
+     * happening instead of guessing.
+     */
+    sealed interface ReconnectUi {
+        /** Nothing to reconnect: a session is ready, or no device is trusted. */
+        data object Idle : ReconnectUi
+
+        /** A trusted device exists and is being waited for / retried. */
+        data object Waiting : ReconnectUi
+
+        /** Dialling a trusted device right now. */
+        data class Connecting(val peerName: String) : ReconnectUi
+    }
+
     private val identity = DeviceIdentity.loadOrCreate(context)
     private val tlsIdentity = NexusTlsIdentity.loadOrCreate(context, identity.deviceId)
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -62,6 +79,7 @@ class DiscoveryController(context: Context) : DiscoveryManager.Listener, Connect
             )
             clipboard.beginSession()
             flushHarnessClipboard()
+            mainExecutor.execute { onReconnectSucceeded(peer.deviceId) }
         }
 
         override fun onApplicationMessage(conn: Connection, peer: DeviceInfo, env: Envelope) {
@@ -102,6 +120,28 @@ class DiscoveryController(context: Context) : DiscoveryManager.Listener, Connect
     private val _peers = MutableStateFlow<List<PeerInfo>>(emptyList())
     val peers: StateFlow<List<PeerInfo>> = _peers.asStateFlow()
 
+    /** Automatic reconnection to an already-trusted device, for the UI. */
+    private val _reconnectUi = MutableStateFlow<ReconnectUi>(ReconnectUi.Idle)
+    val reconnectUi: StateFlow<ReconnectUi> = _reconnectUi.asStateFlow()
+
+    /** Foreground lifecycle gate: no dials are started while paused. */
+    @Volatile
+    private var running = false
+
+    /**
+     * Reconnect bookkeeping. Mutated only on [mainExecutor] (main thread);
+     * [inFlightDeviceId] and [reconnectPeer] are read from connection threads.
+     */
+    private val lastAttemptAt = mutableMapOf<String, Long>()
+    private val failures = mutableMapOf<String, Int>()
+    private var reconnectTask: Runnable? = null
+
+    @Volatile
+    private var inFlightDeviceId: String? = null
+
+    @Volatile
+    private var reconnectPeer: PeerInfo? = null
+
     private val discovery = DiscoveryManager(
         context = context,
         localDeviceId = identity.deviceId,
@@ -116,21 +156,37 @@ class DiscoveryController(context: Context) : DiscoveryManager.Listener, Connect
         discovery.advertise(localPort)
         discovery.startBrowsing()
         clipboard.start()
+        // Foreground: a trusted peer that is already visible may be dialled
+        // immediately; otherwise discovery triggers the attempt as soon as it
+        // resolves, so reopening the app reconnects on its own.
+        running = true
+        mainExecutor.execute { evaluateReconnect() }
     }
 
     /**
      * Pause discovery (advertise + browse off) but keep the TLS server —
      * it is owned for the whole process lifetime.
+     *
+     * Automatic reconnection is foreground-only: no new dial is started while
+     * paused, so nothing pretends to be a background connection. A dial that
+     * is already in flight is allowed to finish.
      */
     fun stop() {
+        running = false
+        cancelPendingReconnect()
+        inFlightDeviceId = null
+        reconnectPeer = null
         discovery.shutdown()
         _peers.value = emptyList()
         _state.value = "stopped"
         clipboard.stop()
+        updateReconnectUi()
     }
 
     /** Full teardown; only for process death paths. */
     fun destroy() {
+        running = false
+        cancelPendingReconnect()
         discovery.shutdown()
         server.close()
         clipboard.close()
@@ -248,12 +304,18 @@ class DiscoveryController(context: Context) : DiscoveryManager.Listener, Connect
     /** Forget a trusted device (pairing.md § Unpairing). */
     fun unpair(deviceId: String) {
         pairing.unpair(deviceId)
+        // The pin is the only thing that authorises a reconnect, so drop any
+        // plan for it and re-evaluate immediately.
+        mainExecutor.execute { evaluateReconnect() }
     }
 
     /**
      * Connect to a discovered peer and run pairing as **initiator**
-     * (test harness / UI "Pair" action; milestone A4 adds automatic
-     * reconnection to already-trusted peers).
+     * (the UI's "Pair" action and the adb harness).
+     *
+     * User-initiated: an untrusted peer legitimately starts the pairing
+     * handshake. Automatic reconnection uses [dial] instead, which may never
+     * pair.
      */
     fun connectTo(host: String, port: Int) {
         Thread({
@@ -269,14 +331,148 @@ class DiscoveryController(context: Context) : DiscoveryManager.Listener, Connect
         }, "nexus-connect").apply { isDaemon = true; start() }
     }
 
+    // -- Trusted auto-reconnect (pairing.md § Trust states) ----------------
+
+    /**
+     * Decide whether a trusted device should be dialled now, and dial it.
+     *
+     * Main thread only. A dial happens only when the app is in the
+     * foreground, no session is ready, no other attempt is in flight, and a
+     * device that is **already pinned in the trust store** is currently
+     * visible over discovery. Discovery on its own never authorises a
+     * connection: identity is re-verified by certificate pinning during TLS
+     * ([PairingManager.onEstablished]), and a peer that no longer matches the
+     * pin is dropped without pairing. This method never pairs, never shows a
+     * code, and never asks the user for anything.
+     */
+    private fun evaluateReconnect() {
+        if (!running) return
+        if (session.isReady()) {
+            inFlightDeviceId = null
+            reconnectPeer = null
+            cancelPendingReconnect()
+            updateReconnectUi()
+            return
+        }
+        if (inFlightDeviceId != null) return
+
+        val now = SystemClock.elapsedRealtime()
+        val candidate = TrustedReconnect.candidate(
+            peers = _peers.value,
+            trustedDeviceIds = trustedDevices.value.map { it.deviceId }.toSet(),
+            lastAttemptAt = lastAttemptAt,
+            failures = failures,
+            now = now,
+            protocolVersion = DeviceInfo.PROTOCOL_VERSION
+        )
+        if (candidate == null) {
+            // Nothing dialable right now (no trusted peer visible, or still
+            // backing off). Re-check locally; discovery events re-trigger us
+            // the moment the peer appears.
+            scheduleReconnect(TrustedReconnect.RECHECK_MS)
+            updateReconnectUi()
+            return
+        }
+        dial(candidate)
+    }
+
+    /**
+     * Dial a trusted peer as the initiator, in reconnect-only mode so a
+     * certificate that no longer matches can never turn into pairing.
+     */
+    private fun dial(peer: PeerInfo) {
+        inFlightDeviceId = peer.deviceId
+        reconnectPeer = peer
+        lastAttemptAt[peer.deviceId] = SystemClock.elapsedRealtime()
+        cancelPendingReconnect()
+        updateReconnectUi()
+        Log.i(TAG, "auto-reconnecting to trusted device ${peer.name} …")
+        Thread({
+            try {
+                val socket = Tls.connect(Tls.context(tlsIdentity), peer.host, peer.port)
+                socket.soTimeout = Connection.READ_TIMEOUT_MS
+                val conn = Connection(
+                    socket,
+                    Connection.Role.CLIENT,
+                    this,
+                    reconnectOnly = true
+                )
+                conn.start()
+            } catch (e: Exception) {
+                Log.i(TAG, "auto-reconnect to ${peer.name} failed: $e")
+                mainExecutor.execute { onConnectionEnded(peer.deviceId) }
+            }
+        }, "nexus-reconnect").apply { isDaemon = true; start() }
+    }
+
+    /** The session became ready: stop retrying and forget the backoff. */
+    private fun onReconnectSucceeded(deviceId: String) {
+        if (inFlightDeviceId == deviceId) inFlightDeviceId = null
+        reconnectPeer = null
+        failures.remove(deviceId)
+        cancelPendingReconnect()
+        updateReconnectUi()
+    }
+
+    /**
+     * A connection ended. Any ended connection is a reason to try again: the
+     * dial we made (whatever its outcome), or the session that was live.
+     * [deviceId] is null when the connection belonged to no trusted device.
+     */
+    private fun onConnectionEnded(deviceId: String?) {
+        if (deviceId != null) {
+            if (inFlightDeviceId == deviceId) inFlightDeviceId = null
+            failures[deviceId] = (failures[deviceId] ?: 0) + 1
+        }
+        reconnectPeer = null
+        if (!running) {
+            updateReconnectUi()
+            return
+        }
+        scheduleReconnect(
+            deviceId?.let { TrustedReconnect.waitMs(failures[it] ?: 0) }
+                ?: TrustedReconnect.RECHECK_MS
+        )
+        updateReconnectUi()
+    }
+
+    private fun scheduleReconnect(delayMs: Long) {
+        cancelPendingReconnect()
+        val task = Runnable {
+            reconnectTask = null
+            evaluateReconnect()
+        }
+        reconnectTask = task
+        mainHandler.postDelayed(task, delayMs)
+    }
+
+    private fun cancelPendingReconnect() {
+        reconnectTask?.let { mainHandler.removeCallbacks(it) }
+        reconnectTask = null
+    }
+
+    private fun updateReconnectUi() {
+        val peer = reconnectPeer
+        _reconnectUi.value = when {
+            session.isReady() -> ReconnectUi.Idle
+            inFlightDeviceId != null && peer != null -> ReconnectUi.Connecting(peer.name)
+            running && trustedDevices.value.isNotEmpty() -> ReconnectUi.Waiting
+            else -> ReconnectUi.Idle
+        }
+    }
+
     // DiscoveryManager.Listener (always on mainExecutor) -------------------
 
     override fun onPeerFound(peer: PeerInfo) {
         _peers.value = discovery.currentPeers()
+        // A trusted peer just (re)appeared: reconnect without waiting for the
+        // next backoff tick.
+        evaluateReconnect()
     }
 
     override fun onPeerLost(serviceName: String) {
         _peers.value = discovery.currentPeers()
+        updateReconnectUi()
     }
 
     override fun onDiscoveryState(state: String) {
@@ -297,6 +493,11 @@ class DiscoveryController(context: Context) : DiscoveryManager.Listener, Connect
     override fun onClosed(conn: Connection, reason: String) {
         Log.i(TAG, "session closed: $reason")
         pairing.onConnectionClosed(conn, reason)
+        // A trusted or reconnect-dialled connection ended: schedule the next
+        // automatic attempt (throttled per device). The device id comes from
+        // the pin the peer matched, or from the dial that is still in flight.
+        val deviceId = conn.trusted?.deviceId ?: inFlightDeviceId
+        mainExecutor.execute { onConnectionEnded(deviceId) }
     }
 
     companion object {

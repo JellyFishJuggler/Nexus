@@ -295,7 +295,7 @@ function trustedRows(s) {
       } else if (p) {
         actions += btn("Connect", "connect", { cls: "btn btn-primary", icon: "link", id: d.device_id });
       }
-      actions += btn("Forget", "unpair", { cls: "btn", icon: "trash" });
+      actions += btn("Forget", "unpair", { cls: "btn", icon: "trash", id: d.device_id });
 
       return deviceRow({
         iconName: platformIcon(d.platform),
