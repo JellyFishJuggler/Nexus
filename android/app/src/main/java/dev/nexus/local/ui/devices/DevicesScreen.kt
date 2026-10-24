@@ -41,6 +41,7 @@ import dev.nexus.local.ui.components.NexusCard
 import dev.nexus.local.ui.components.SegmentedTabs
 import dev.nexus.local.ui.components.StatusLabel
 import dev.nexus.local.ui.components.platformLabel
+import dev.nexus.local.ui.setup.SetupGuideDialog
 import dev.nexus.local.ui.theme.nexus
 
 /**
@@ -59,6 +60,7 @@ fun DevicesScreen(
     modifier: Modifier = Modifier
 ) {
     var pendingRemoval by remember { mutableStateOf<TrustedDevice?>(null) }
+    var setupOpen by remember { mutableStateOf(false) }
 
     Column(
         modifier = modifier
@@ -79,7 +81,11 @@ fun DevicesScreen(
         )
 
         when (section) {
-            DevicesSection.NEARBY -> NearbySection(state = state, actions = actions)
+            DevicesSection.NEARBY -> NearbySection(
+                state = state,
+                actions = actions,
+                onOpenSetup = { setupOpen = true }
+            )
             DevicesSection.TRUSTED -> TrustedSection(
                 state = state,
                 onRemove = { pendingRemoval = it }
@@ -98,12 +104,24 @@ fun DevicesScreen(
             }
         )
     }
+
+    if (setupOpen) {
+        SetupGuideDialog(
+            pairingMode = state.pairingMode,
+            onStartPairing = actions.onStartPairing,
+            onDismiss = { setupOpen = false }
+        )
+    }
 }
 
 // ---- nearby ---------------------------------------------------------------
 
 @Composable
-private fun NearbySection(state: NexusUiState, actions: NexusActions) {
+private fun NearbySection(
+    state: NexusUiState,
+    actions: NexusActions,
+    onOpenSetup: () -> Unit
+) {
     val p = MaterialTheme.nexus
     NexusCard {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -120,6 +138,7 @@ private fun NearbySection(state: NexusUiState, actions: NexusActions) {
                     modifier = Modifier.padding(top = 2.dp)
                 )
             }
+            GhostButton(text = "Set up", onClick = onOpenSetup)
             GhostButton(text = "Refresh", onClick = actions.onRefresh)
         }
 

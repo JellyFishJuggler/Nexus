@@ -47,6 +47,8 @@ fun SettingsScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         GeneralSection(state = state, actions = actions)
+        NotificationsSection(state = state, actions = actions)
+        BackgroundSection(state = state, actions = actions)
         PrivacySection(
             trustedCount = state.trusted.size,
             onOpenTrustedDevices = onOpenTrustedDevices
@@ -93,6 +95,124 @@ private fun GeneralSection(state: NexusUiState, actions: NexusActions) {
                 )
             )
         }
+    }
+}
+
+@Composable
+private fun NotificationsSection(state: NexusUiState, actions: NexusActions) {
+    val p = MaterialTheme.nexus
+    NexusCard {
+        SectionLabel("Notifications")
+        Text(
+            text = "Forward notifications from this phone to your connected computer.",
+            style = MaterialTheme.typography.bodySmall,
+            color = p.inkMuted,
+            modifier = Modifier.padding(top = 10.dp)
+        )
+        Column(
+            modifier = Modifier.padding(top = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            InfoRow(
+                title = "Notification access",
+                subtitle = if (state.notificationAccess) {
+                    "Granted. Nexus can mirror notifications from this phone."
+                } else {
+                    "Not granted. Open system settings to allow notification access."
+                },
+                value = if (state.notificationAccess) "Granted" else "Off",
+                onClick = actions.onOpenNotificationAccess
+            )
+            ToggleRow(
+                title = "Mirror notifications",
+                subtitle = "Show phone notifications on your computer. Off by default.",
+                checked = state.mirrorNotifications,
+                enabled = state.notificationAccess,
+                onCheckedChange = actions.onToggleMirrorNotifications
+            )
+            ToggleRow(
+                title = "Hide notification text",
+                subtitle = "Forward only the app name and title, never the message body.",
+                checked = state.hideNotificationText,
+                enabled = state.mirrorNotifications,
+                onCheckedChange = actions.onToggleHideNotificationText
+            )
+            Text(
+                text = "Notification content is sent only over the encrypted local " +
+                    "link. It is never stored, uploaded, or written to logs.",
+                style = MaterialTheme.typography.bodySmall,
+                color = p.inkFaint
+            )
+        }
+    }
+}
+
+@Composable
+private fun BackgroundSection(state: NexusUiState, actions: NexusActions) {
+    val p = MaterialTheme.nexus
+    NexusCard {
+        SectionLabel("Background")
+        Column(
+            modifier = Modifier.padding(top = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            ToggleRow(
+                title = "Start on boot",
+                subtitle = "Keep the local link ready after this phone restarts.",
+                checked = state.startOnBoot,
+                onCheckedChange = actions.onToggleStartOnBoot
+            )
+            Text(
+                text = "Nexus shows a low-priority notification while it runs in the " +
+                    "background. Clipboard sync still reads the clipboard only while " +
+                    "Nexus is open.",
+                style = MaterialTheme.typography.bodySmall,
+                color = p.inkFaint
+            )
+        }
+    }
+}
+
+@Composable
+private fun ToggleRow(
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    enabled: Boolean = true
+) {
+    val p = MaterialTheme.nexus
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleSmall,
+                color = p.ink
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = p.inkMuted,
+                modifier = Modifier.padding(top = 2.dp)
+            )
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            enabled = enabled,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = Color.White,
+                checkedTrackColor = p.green,
+                checkedBorderColor = p.green,
+                uncheckedThumbColor = Color.White,
+                uncheckedTrackColor = p.borderStrong,
+                uncheckedBorderColor = p.borderStrong
+            )
+        )
     }
 }
 

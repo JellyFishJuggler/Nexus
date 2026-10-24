@@ -71,6 +71,9 @@ pub struct Settings {
     pub media_enabled: bool,
     /// Whether incoming file transfers are accepted.
     pub accept_transfers: bool,
+    /// Whether phone→computer notification mirroring is shown. Default: on,
+    /// because the phone only sends when the user opted in there.
+    pub notifications_enabled: bool,
     /// Directory for received files; `None` = platform default.
     pub download_dir: Option<String>,
 }
@@ -83,6 +86,7 @@ impl Default for Settings {
             clipboard_enabled: true,
             media_enabled: true,
             accept_transfers: true,
+            notifications_enabled: true,
             download_dir: None,
         }
     }
@@ -146,6 +150,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let loaded = Settings::load(dir.path());
         assert!(loaded.clipboard_enabled);
+        assert!(loaded.notifications_enabled);
         assert!(!loaded.device_name.is_empty());
     }
 }

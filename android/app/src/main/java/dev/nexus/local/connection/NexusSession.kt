@@ -64,7 +64,13 @@ class NexusSession(
     /** Send an application envelope on the active session. */
     fun send(env: Envelope): Boolean {
         val active = synchronized(lock) { conn } ?: return false
-        return runCatching { active.send(env) }.isSuccess
+        val result = runCatching { active.send(env) }
+        val error = result.exceptionOrNull()
+        if (error != null) {
+            // Type and message only: payloads are never logged.
+            Log.w(TAG, "send failed: ${error.javaClass.simpleName}: ${error.message}")
+        }
+        return result.isSuccess
     }
 
     // -- TrustedSessionHandler --------------------------------------------

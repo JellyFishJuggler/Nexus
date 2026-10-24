@@ -67,7 +67,15 @@ data class NexusUiState(
     val connectionLost: Boolean,
     /** What the automatic reconnection to a trusted device is doing. */
     val reconnect: DiscoveryController.ReconnectUi,
-    val darkTheme: Boolean
+    val darkTheme: Boolean,
+    /** Keep the local link available after a reboot. */
+    val startOnBoot: Boolean,
+    /** Opt-in phone→computer notification mirroring. */
+    val mirrorNotifications: Boolean,
+    /** Strip notification bodies before forwarding. */
+    val hideNotificationText: Boolean,
+    /** Whether the system notification-listener grant is in place. */
+    val notificationAccess: Boolean
 )
 
 /**
@@ -89,7 +97,15 @@ data class NexusActions(
     /** Push this device's clipboard to the connected peer now. */
     val onSendClipboard: () -> Unit,
     val onOpenRepository: () -> Unit,
-    val onToggleDarkTheme: (Boolean) -> Unit
+    val onToggleDarkTheme: (Boolean) -> Unit,
+    /** Start Nexus in the background after a reboot. */
+    val onToggleStartOnBoot: (Boolean) -> Unit,
+    /** Enable/disable phone→computer notification mirroring. */
+    val onToggleMirrorNotifications: (Boolean) -> Unit,
+    /** Forward only app + title, never the notification body. */
+    val onToggleHideNotificationText: (Boolean) -> Unit,
+    /** Open the system notification-listener access screen. */
+    val onOpenNotificationAccess: () -> Unit
 )
 
 /**

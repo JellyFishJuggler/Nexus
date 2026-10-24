@@ -42,6 +42,7 @@ import dev.nexus.local.ui.components.CardHeading
 import dev.nexus.local.ui.components.ConnectionIllustration
 import dev.nexus.local.ui.components.DeviceGlyph
 import dev.nexus.local.ui.components.EmptyState
+import dev.nexus.local.ui.components.GhostButton
 import dev.nexus.local.ui.components.KeyValueRow
 import dev.nexus.local.ui.components.NexusCard
 import dev.nexus.local.ui.components.PillKind
@@ -56,6 +57,7 @@ import dev.nexus.local.ui.components.platformLabel
 import dev.nexus.local.ui.components.rememberCountdownProgress
 import dev.nexus.local.ui.components.secondsLeft
 import dev.nexus.local.ui.components.shorten
+import dev.nexus.local.ui.setup.SetupGuideDialog
 import dev.nexus.local.ui.theme.nexus
 
 /**
@@ -74,6 +76,7 @@ fun HomeScreen(
     modifier: Modifier = Modifier
 ) {
     var detailsOpen by remember { mutableStateOf(false) }
+    var setupOpen by remember { mutableStateOf(false) }
 
     Column(
         modifier = modifier
@@ -90,7 +93,11 @@ fun HomeScreen(
         if (state.session.ready) {
             ConnectedHero(state)
         } else {
-            DisconnectedHero(state = state, actions = actions)
+            DisconnectedHero(
+                state = state,
+                actions = actions,
+                onOpenSetup = { setupOpen = true }
+            )
         }
 
         ThisDeviceCard(
@@ -112,12 +119,24 @@ fun HomeScreen(
     if (detailsOpen) {
         ThisDeviceDialog(state = state, onDismiss = { detailsOpen = false })
     }
+
+    if (setupOpen) {
+        SetupGuideDialog(
+            pairingMode = state.pairingMode,
+            onStartPairing = actions.onStartPairing,
+            onDismiss = { setupOpen = false }
+        )
+    }
 }
 
 // ---- disconnected ---------------------------------------------------------
 
 @Composable
-private fun DisconnectedHero(state: NexusUiState, actions: NexusActions) {
+private fun DisconnectedHero(
+    state: NexusUiState,
+    actions: NexusActions,
+    onOpenSetup: () -> Unit
+) {
     val p = MaterialTheme.nexus
     NexusCard {
         Column(
@@ -154,6 +173,11 @@ private fun DisconnectedHero(state: NexusUiState, actions: NexusActions) {
                     color = p.inkFaint,
                     textAlign = TextAlign.Center,
                     modifier = Modifier.padding(top = 10.dp)
+                )
+                GhostButton(
+                    text = "Set up a device",
+                    onClick = onOpenSetup,
+                    modifier = Modifier.padding(top = 6.dp)
                 )
             }
         }
