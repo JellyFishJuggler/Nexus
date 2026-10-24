@@ -66,6 +66,8 @@ impl DeviceInfo {
             "clipboard".to_string(),
             "transfer".to_string(),
             "media".to_string(),
+            // v0.2.0: receiving phone→computer notification mirroring.
+            "notifications".to_string(),
         ]
     }
 

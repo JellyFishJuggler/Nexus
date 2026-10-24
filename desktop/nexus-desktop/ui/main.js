@@ -116,7 +116,7 @@ const NAV = [
   { id: "devices", label: "Devices", icon: "devices" },
   { id: "clipboard", label: "Clipboard", icon: "clipboard" },
   { id: "files", label: "Files", icon: "files", soon: true },
-  { id: "notifications", label: "Notifications", icon: "bell", soon: true },
+  { id: "notifications", label: "Notifications", icon: "bell" },
   { id: "settings", label: "Settings", icon: "settings" },
 ];
 
@@ -125,7 +125,7 @@ const PAGES = {
   devices: { title: "Devices", sub: "Manage devices connected to Nexus." },
   clipboard: { title: "Clipboard", sub: "Keep text copied on your devices in sync." },
   files: { title: "Files", sub: "Secure local file transfer is planned for a future release." },
-  notifications: { title: "Notifications", sub: "Notifications are planned for a future release." },
+  notifications: { title: "Notifications", sub: "Notifications mirrored from your phone." },
   settings: { title: "Settings", sub: "Preferences for this Nexus device." },
 };
 
@@ -137,6 +137,7 @@ const state = {
   pairingStartedAt: null,
   clearedActivityAt: 0,
   devOpen: false,
+  autostart: null, // null = checking, boolean = actual OS state
 };
 
 let lastSig = null;
@@ -201,6 +202,17 @@ function dot(kind) {
 
 function clipToggle(checked) {
   return `<label class="switch"><input type="checkbox" data-clip-toggle${checked ? " checked" : ""}><span class="track"><span class="thumb"></span></span></label>`;
+}
+
+function notifToggle(checked) {
+  return `<label class="switch"><input type="checkbox" data-notif-toggle${checked ? " checked" : ""}><span class="track"><span class="thumb"></span></span></label>`;
+}
+
+function autostartToggle(checked) {
+  if (checked === null || checked === undefined) {
+    return '<span class="muted small">Checking…</span>';
+  }
+  return `<label class="switch"><input type="checkbox" data-autostart-toggle${checked ? " checked" : ""}><span class="track"><span class="thumb"></span></span></label>`;
 }
 
 function peerStatus(p) {
@@ -501,7 +513,30 @@ function renderHome(s) {
 }
 
 function renderDevices(s) {
-  return devicesBlock(s, null, "Nearby");
+  return setupCard(s) + devicesBlock(s, null, "Nearby");
+}
+
+/** On-demand guidance for pairing a phone; reachable even after the first pair. */
+function setupCard(s) {
+  const open = !!s.pairing_mode;
+  const action = open
+    ? `<span class="badge badge-amber">${dot("amber")}Pairing open</span>`
+    : btn("Allow pairing", "allow-pairing", { cls: "btn btn-strong", icon: "link" });
+  return `<section class="card">
+    <div class="card-head">
+      <div class="card-head-text">
+        <h3>Set up your phone</h3>
+        <p class="muted small">Pair once; Nexus reconnects automatically afterwards.</p>
+      </div>
+      ${action}
+    </div>
+    <ol class="setup-steps">
+      <li><strong>Same network.</strong> Connect this computer and your phone to the same Wi-Fi.</li>
+      <li><strong>Open Nexus on your phone.</strong> Go to Devices → Set up → Start pairing. The phone opens a 60-second pairing window.</li>
+      <li><strong>Pair here.</strong> Choose the phone under Nearby and tap Pair. Compare the code on both screens, then confirm.</li>
+    </ol>
+    <p class="note">${icon("info", "ic-sm")}You can also tap Allow pairing first, then start pairing from your phone's Nearby list.</p>
+  </section>`;
 }
 
 function renderClipboardPage(s) {
@@ -536,6 +571,57 @@ function renderClipboardPage(s) {
   </section>`;
 }
 
+function renderNotifications(s) {
+  const items = s.notifications || [];
+  const enabled = !!s.notifications_enabled;
+  const connected = !!s.connection;
+
+  const list = items.length
+    ? '<ul class="activity notification-list">' +
+      items
+        .map(
+          (n) => `<li class="activity-item notification-item">
+            <span class="activity-icon">${icon("bell", "ic-sm")}</span>
+            <div class="notification-body">
+              <div class="notification-head">
+                <span class="notification-app">${esc(n.app)}</span>
+                <span class="activity-time">${esc(timeLabel(n.at))}</span>
+              </div>
+              ${n.title ? `<div class="notification-title">${esc(n.title)}</div>` : ""}
+              ${n.text ? `<div class="notification-text">${esc(n.text)}</div>` : ""}
+            </div>
+          </li>`
+        )
+        .join("") +
+      "</ul>"
+    : emptyState(
+        "No notifications yet",
+        connected
+          ? "Notifications from your phone appear here while Nexus is connected."
+          : "Connect your phone to mirror its notifications."
+      );
+
+  return `<section class="card">
+    <div class="card-head">
+      <div class="card-head-text">
+        <h3>Phone notifications</h3>
+        <p class="muted small">Mirrored over the encrypted local link. Kept in memory only, never saved.</p>
+      </div>
+      ${items.length ? '<button class="btn btn-ghost btn-sm" data-act="clear-notifications" type="button">Clear</button>' : ""}
+    </div>
+    ${!enabled ? `<p class="note">${icon("info", "ic-sm")}Phone notifications are hidden. Turn them on in Settings.</p>` : ""}
+    ${!connected ? `<p class="note">${icon("info", "ic-sm")}Waiting for a phone to connect.</p>` : ""}
+    ${list}
+    <div class="switch-row notification-foot">
+      <div>
+        <div>Show phone notifications</div>
+        <div class="muted small">Mirroring must also be enabled on the phone.</div>
+      </div>
+      ${notifToggle(enabled)}
+    </div>
+  </section>`;
+}
+
 function renderSettings(s) {
   return `<section class="card">
     <div class="card-head"><h3>General</h3></div>
@@ -556,6 +642,20 @@ function renderSettings(s) {
     </div>
   </section>
   <section class="card">
+    <div class="card-head"><h3>Phone notifications</h3></div>
+    <div class="switch-row">
+      <div><div>Show phone notifications</div><div class="muted small">Display notifications mirrored from your phone. Mirroring is opt-in on Android.</div></div>
+      ${notifToggle(!!s.notifications_enabled)}
+    </div>
+  </section>
+  <section class="card">
+    <div class="card-head"><h3>Startup</h3></div>
+    <div class="switch-row">
+      <div><div>Start Nexus when I sign in</div><div class="muted small">Keeps the local link ready after you log in.</div></div>
+      ${autostartToggle(state.autostart)}
+    </div>
+  </section>
+  <section class="card">
     <div class="card-head"><h3>Security</h3></div>
     <div class="kv-list">
       <div class="kv-row"><span class="kv-k">Trusted devices</span><span class="kv-v">${(s.trusted || []).length} paired</span></div>
@@ -566,7 +666,7 @@ function renderSettings(s) {
     <div class="card-head"><h3>About</h3></div>
     <div class="about">
       <div class="about-name">Nexus</div>
-      <div class="muted small">Version 0.1.0 · Local-first device companion</div>
+      <div class="muted small">Version ${esc(s.version || "—")} · Local-first device companion</div>
       <div class="muted small">No cloud connection — all traffic stays on your local network.</div>
     </div>
   </section>
@@ -607,6 +707,9 @@ function render() {
     return;
   }
 
+  const versionEl = document.querySelector(".version");
+  if (versionEl && s.version) versionEl.textContent = "v" + s.version;
+
   if (s.pairing_mode) {
     if (!state.pairingStartedAt) state.pairingStartedAt = Date.now();
   } else {
@@ -625,8 +728,10 @@ function render() {
       html = renderSettings(s);
       break;
     case "files":
-    case "notifications":
       html = renderPlaceholder(state.page);
+      break;
+    case "notifications":
+      html = renderNotifications(s);
       break;
     default:
       html = renderHome(s);
@@ -818,6 +923,9 @@ document.addEventListener("click", async (e) => {
       state.clearedActivityAt = Date.now();
       render();
       break;
+    case "clear-notifications":
+      await act("clear_notifications");
+      break;
     case "clear-logs": {
       const pre = document.querySelector(".log");
       if (pre) pre.textContent = "";
@@ -833,12 +941,30 @@ document.addEventListener("click", async (e) => {
 });
 
 document.addEventListener("change", (e) => {
-  const input = e.target.closest("[data-clip-toggle]");
-  if (!input) return;
-  const enabled = input.checked;
-  if (state.status) state.status.clipboard_enabled = enabled; // optimistic
-  render();
-  act("set_clipboard_enabled", { enabled });
+  const clip = e.target.closest("[data-clip-toggle]");
+  if (clip) {
+    const enabled = clip.checked;
+    if (state.status) state.status.clipboard_enabled = enabled; // optimistic
+    render();
+    act("set_clipboard_enabled", { enabled });
+    return;
+  }
+
+  const notif = e.target.closest("[data-notif-toggle]");
+  if (notif) {
+    const enabled = notif.checked;
+    if (state.status) state.status.notifications_enabled = enabled; // optimistic
+    render();
+    act("set_notifications_enabled", { enabled });
+    return;
+  }
+
+  const auto = e.target.closest("[data-autostart-toggle]");
+  if (auto) {
+    state.autostart = auto.checked;
+    render();
+    setAutostart(auto.checked);
+  }
 });
 
 document.addEventListener("toggle", (e) => {
@@ -846,10 +972,52 @@ document.addEventListener("toggle", (e) => {
   if (d && d.classList && d.classList.contains("dev-logs")) state.devOpen = d.open;
 }, true);
 
+/* --------------------------------------------------------------- autostart */
+
+/**
+ * Default on: the first run enables OS autostart once, then remembers that the
+ * user has seen (and can change) the choice in Settings.
+ */
+async function initAutostart() {
+  try {
+    const enabled = !!(await invoke("plugin:autostart|is_enabled"));
+    if (!enabled && !localStorage.getItem("nexus.autostart.initialized")) {
+      await invoke("plugin:autostart|enable");
+    }
+    localStorage.setItem("nexus.autostart.initialized", "1");
+    state.autostart = !!(await invoke("plugin:autostart|is_enabled"));
+  } catch (err) {
+    console.error("autostart:init", err);
+    state.autostart = false;
+  }
+  render();
+}
+
+async function setAutostart(enabled) {
+  try {
+    await invoke(enabled ? "plugin:autostart|enable" : "plugin:autostart|disable");
+    localStorage.setItem("nexus.autostart.initialized", "1");
+    toast(
+      enabled ? "Nexus will start when you sign in" : "Nexus will no longer start automatically",
+      "info"
+    );
+  } catch (err) {
+    console.error("autostart", err);
+    toast("Couldn't change the startup setting.", "error");
+  }
+  try {
+    state.autostart = !!(await invoke("plugin:autostart|is_enabled"));
+  } catch (err) {
+    state.autostart = !enabled;
+  }
+  render();
+}
+
 /* -------------------------------------------------------------------- boot */
 
 render();
 refresh();
+initAutostart();
 setInterval(refresh, 500);
 // Keep relative timestamps ("just now", "2 min ago") honest without a full
 // re-render: only refresh when the snapshot is unchanged but time has passed.

@@ -22,11 +22,17 @@ fn main() {
     let (shared, cmd_rx) = app::Shared::new();
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
+        .plugin(tauri_plugin_notification::init())
         .setup({
             let shared = shared.clone();
             move |app| {
                 app.manage(shared.clone());
-                tauri::async_runtime::spawn(app::run(shared, cmd_rx));
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(app::run(shared, cmd_rx, handle));
                 Ok(())
             }
         })
@@ -47,6 +53,8 @@ fn main() {
             commands::disconnect,
             commands::unpair,
             commands::set_clipboard_enabled,
+            commands::set_notifications_enabled,
+            commands::clear_notifications,
             commands::allow_pairing,
             commands::push_clipboard,
             commands::respond_pairing,

@@ -151,27 +151,51 @@ class DiscoveryController(context: Context) : DiscoveryManager.Listener, Connect
         listener = this
     )
 
+    /**
+     * Bring up discovery, advertising and clipboard sync.
+     *
+     * The service owns the network half for the life of the process; the
+     * activity owns the clipboard half while it is resumed. This combined
+     * entry point exists for harness/tests and for callers that own both.
+     */
     fun start() {
+        startNetwork()
+        clipboard.start()
+    }
+
+    /**
+     * Bring up the TLS server and mDNS advertise/browse. Idempotent; called by
+     * [dev.nexus.local.service.NexusService] when the process starts.
+     */
+    fun startNetwork() {
+        if (running) return
         server.start()
         discovery.advertise(localPort)
         discovery.startBrowsing()
-        clipboard.start()
-        // Foreground: a trusted peer that is already visible may be dialled
-        // immediately; otherwise discovery triggers the attempt as soon as it
-        // resolves, so reopening the app reconnects on its own.
+        // A trusted peer that is already visible may be dialled immediately;
+        // otherwise discovery triggers the attempt as soon as it resolves.
         running = true
         mainExecutor.execute { evaluateReconnect() }
     }
 
     /**
-     * Pause discovery (advertise + browse off) but keep the TLS server —
-     * it is owned for the whole process lifetime.
-     *
-     * Automatic reconnection is foreground-only: no new dial is started while
-     * paused, so nothing pretends to be a background connection. A dial that
-     * is already in flight is allowed to finish.
+     * Clipboard sync is foreground-only by design (Android restricts clipboard
+     * reads to the focused app), so the activity starts and stops it with its
+     * own lifecycle — never the background service.
      */
-    fun stop() {
+    fun startClipboard() = clipboard.start()
+
+    fun stopClipboard() = clipboard.stop()
+
+    /**
+     * Stop discovery/advertising and the automatic reconnect loop while
+     * keeping the TLS server (owned for the whole process lifetime).
+     *
+     * Automatic reconnection is paused here: no new dial is started, so
+     * nothing pretends to be a background connection. A dial already in flight
+     * is allowed to finish.
+     */
+    fun stopNetwork() {
         running = false
         cancelPendingReconnect()
         inFlightDeviceId = null
@@ -179,8 +203,13 @@ class DiscoveryController(context: Context) : DiscoveryManager.Listener, Connect
         discovery.shutdown()
         _peers.value = emptyList()
         _state.value = "stopped"
-        clipboard.stop()
         updateReconnectUi()
+    }
+
+    /** Full stop: network + clipboard. */
+    fun stop() {
+        stopNetwork()
+        clipboard.stop()
     }
 
     /** Full teardown; only for process death paths. */
@@ -196,6 +225,35 @@ class DiscoveryController(context: Context) : DiscoveryManager.Listener, Connect
 
     /** Push the current clipboard to the peer now (UI action). */
     fun pushClipboard() = clipboard.pushNow()
+
+    // -- Notification mirroring (protocol/notifications.md) ----------------
+
+    /** Whether a trusted, application-ready session exists right now. */
+    fun isSessionReady(): Boolean = session.isReady()
+
+    /** Whether the ready peer advertises notification mirroring. */
+    fun peerSupportsNotifications(): Boolean =
+        session.currentPeer()?.features?.contains("notifications") == true
+
+    /**
+     * Forward one notification to the connected computer.
+     *
+     * Returns false when nothing was sent (no ready session, or empty
+     * payload). Callers must not log the content: this method deliberately
+     * only logs a boolean/size at most.
+     */
+    fun sendNotification(app: String, title: String, text: String): Boolean {
+        if (app.isBlank()) return false
+        if (title.isBlank() && text.isBlank()) return false
+        return session.send(
+            Envelope.create("notification.post", JSONObject().apply {
+                put("app", app)
+                put("title", title)
+                put("text", text)
+                put("ts", System.currentTimeMillis() / 1000)
+            })
+        )
+    }
 
     /** Test harness: simulate a local copy of [text] and send it. */
     fun setLocalClipboard(text: String) = queueHarnessClipboard { clipboard.setLocalAndSend(text) }

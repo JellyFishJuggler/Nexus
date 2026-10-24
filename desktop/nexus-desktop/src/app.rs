@@ -13,12 +13,15 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use nexus_core::clipboard::{ClipboardUpdate, Inbound, Outbound, SyncState};
+use nexus_core::config::Settings;
 use nexus_core::{
     pair_as_initiator, pair_as_responder, Connection, DeviceInfo, Discovery, DiscoveryEvent,
     Message, Node, PairingDecision, PairingPrompt, PeerInfo, PromptFn, Role, Session,
     TrustedDevice,
 };
 use serde::Serialize;
+use tauri::AppHandle;
+use tauri_plugin_notification::NotificationExt;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
@@ -42,6 +45,9 @@ const LOG_LIMIT: usize = 200;
 /// How many human-readable activity entries the snapshot keeps.
 const ACTIVITY_LIMIT: usize = 50;
 
+/// How many mirrored phone notifications the UI keeps (in memory only).
+const NOTIFICATION_LIMIT: usize = 50;
+
 /// Two identical activity entries closer together than this are collapsed, so
 /// auto-reconnect chatter cannot flood the UI.
 const ACTIVITY_DEDUPE: Duration = Duration::from_secs(5);
@@ -61,6 +67,8 @@ pub struct Status {
     pub platform: String,
     pub port: u16,
     pub data_dir: String,
+    /// Nexus version, for the UI's about panel.
+    pub version: String,
     pub discovery_state: String,
     pub peers: Vec<PeerView>,
     pub trusted: Vec<TrustedView>,
@@ -71,6 +79,10 @@ pub struct Status {
     pub clipboard_state: String,
     pub clipboard_preview: Option<String>,
     pub clipboard_last_at: Option<i64>,
+    /// Whether phone→computer notification mirroring is shown.
+    pub notifications_enabled: bool,
+    /// Mirrored notifications, newest first. Memory only, never persisted.
+    pub notifications: Vec<NotificationView>,
     pub activities: Vec<ActivityView>,
     pub log: Vec<String>,
 }
@@ -124,6 +136,52 @@ pub struct ActivityView {
     /// "info" | "success" | "warn" | "error".
     pub level: String,
     pub text: String,
+}
+
+/// One notification mirrored from the phone, reduced to what the desktop
+/// shows. The phone has already applied the user's "hide text" preference.
+#[derive(Debug, Clone, Serialize)]
+pub struct NotificationView {
+    /// Unix milliseconds.
+    pub at: i64,
+    pub app: String,
+    pub title: String,
+    pub text: String,
+}
+
+impl NotificationView {
+    /// Parse `notification.post` (`protocol/notifications.md`), rejecting
+    /// malformed and content-free payloads and capping every field.
+    fn from_payload(payload: &serde_json::Value) -> Option<Self> {
+        let app = payload.get("app")?.as_str()?.trim();
+        let title = payload
+            .get("title")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        let text = payload
+            .get("text")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+
+        if app.is_empty() || (title.trim().is_empty() && text.trim().is_empty()) {
+            return None;
+        }
+
+        // `ts` is advisory (seconds); fall back to local time when absent.
+        let at = payload
+            .get("ts")
+            .and_then(|value| value.as_i64())
+            .filter(|seconds| *seconds > 0)
+            .map(|seconds| seconds.saturating_mul(1000))
+            .unwrap_or_else(now_ms);
+
+        Some(Self {
+            at,
+            app: one_line(app).chars().take(64).collect(),
+            title: one_line(title).chars().take(200).collect(),
+            text: one_line(text).chars().take(500).collect(),
+        })
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -231,6 +289,10 @@ pub enum Command {
     Unpair(String),
     /// Turn clipboard sync on or off.
     SetClipboardEnabled(bool),
+    /// Show or hide phone→computer notification mirroring.
+    SetNotificationsEnabled(bool),
+    /// Clear the in-memory mirrored notification list.
+    ClearNotifications,
     /// Open the 60-second pairing window (responder role).
     AllowPairing,
     /// Send the current clipboard to the active peer now.
@@ -249,6 +311,7 @@ pub struct Shared {
     cmd_tx: mpsc::UnboundedSender<Command>,
     pairing: PairingBridge,
     clipboard_enabled: Arc<AtomicBool>,
+    notifications_enabled: Arc<AtomicBool>,
 }
 
 impl Shared {
@@ -257,11 +320,13 @@ impl Shared {
         let status = Arc::new(Mutex::new(Status::default()));
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
         let clipboard_enabled = Arc::new(AtomicBool::new(true));
+        let notifications_enabled = Arc::new(AtomicBool::new(true));
         {
             let mut s = status.lock().unwrap();
             s.clipboard_enabled = true;
             s.clipboard_state = "idle".to_string();
             s.discovery_state = "starting".to_string();
+            s.notifications_enabled = true;
         }
         let pairing = PairingBridge::new(status.clone());
         let shared = Arc::new(Self {
@@ -269,6 +334,7 @@ impl Shared {
             cmd_tx,
             pairing,
             clipboard_enabled,
+            notifications_enabled,
         });
         (shared, cmd_rx)
     }
@@ -324,6 +390,7 @@ impl ActiveSession {
 struct Manager {
     node: Arc<Node>,
     shared: Arc<Shared>,
+    app: AppHandle,
     tx: mpsc::UnboundedSender<Event>,
     monitor: ClipboardMonitor,
     peers: HashMap<String, PeerInfo>,
@@ -338,7 +405,11 @@ struct Manager {
 }
 
 /// Start the manager. Runs until the command channel closes.
-pub async fn run(shared: Arc<Shared>, mut cmd_rx: mpsc::UnboundedReceiver<Command>) {
+pub async fn run(
+    shared: Arc<Shared>,
+    mut cmd_rx: mpsc::UnboundedReceiver<Command>,
+    app: AppHandle,
+) {
     let (tx, mut rx) = mpsc::unbounded_channel::<Event>();
 
     let (data_dir, name, port) = parse_args();
@@ -361,7 +432,13 @@ pub async fn run(shared: Arc<Shared>, mut cmd_rx: mpsc::UnboundedReceiver<Comman
         s.platform = node.identity.platform.clone();
         s.port = node.port();
         s.data_dir = node.data_dir.display().to_string();
+        s.version = env!("CARGO_PKG_VERSION").to_string();
         s.discovery_state = "starting".to_string();
+        let settings = Settings::load(&node.data_dir);
+        s.notifications_enabled = settings.notifications_enabled;
+        shared
+            .notifications_enabled
+            .store(settings.notifications_enabled, Ordering::Relaxed);
         push_log(
             &mut s,
             format!(
@@ -454,6 +531,7 @@ pub async fn run(shared: Arc<Shared>, mut cmd_rx: mpsc::UnboundedReceiver<Comman
     let mut manager = Manager {
         node,
         shared,
+        app,
         tx,
         monitor,
         peers: HashMap::new(),
@@ -580,6 +658,37 @@ impl Manager {
                 if enabled {
                     self.monitor.send(ClipboardCommand::Push);
                 }
+            }
+            Command::SetNotificationsEnabled(enabled) => {
+                self.shared
+                    .notifications_enabled
+                    .store(enabled, Ordering::Relaxed);
+                self.status(|s| {
+                    s.notifications_enabled = enabled;
+                    push_log(
+                        s,
+                        format!(
+                            "phone notifications {}",
+                            if enabled { "shown" } else { "hidden" }
+                        ),
+                    );
+                });
+                // Persist the choice; the phone-side switch stays authoritative
+                // about whether anything is sent at all.
+                let dir = self.node.data_dir.clone();
+                let mut settings = Settings::load(&dir);
+                settings.notifications_enabled = enabled;
+                if let Err(e) = settings.save(&dir) {
+                    self.status(|s| {
+                        push_log(s, format!("couldn't save the notification setting: {e}"))
+                    });
+                }
+            }
+            Command::ClearNotifications => {
+                self.status(|s| {
+                    s.notifications.clear();
+                    push_log(s, "cleared the phone notification list".to_string());
+                });
             }
             Command::AllowPairing => {
                 self.pairing_until = Some(Instant::now() + PAIRING_WINDOW);
@@ -885,6 +994,7 @@ impl Manager {
         }
         match message.kind.as_str() {
             "clipboard.update" => self.handle_clipboard_update(&message),
+            "notification.post" => self.handle_notification(&message),
             other => {
                 self.status(|s| push_log(s, format!("unhandled message type {other}")));
                 self.send_error("unknown_type", format!("unsupported message type: {other}"));
@@ -949,6 +1059,66 @@ impl Manager {
         if let Some(active) = &self.active {
             let _ = active.sender.send(Message::error(code, message));
         }
+    }
+
+    // -- Mirrored notifications ------------------------------------------
+
+    /// Handle `notification.post` (`protocol/notifications.md`).
+    ///
+    /// The payload has already had the phone's privacy filter applied. The
+    /// desktop keeps it in memory only, shows a native toast, and records just
+    /// the app label in the activity log — never the title or body.
+    fn handle_notification(&mut self, message: &Message) {
+        if !self.shared.notifications_enabled.load(Ordering::Relaxed) {
+            self.status(|s| {
+                push_log(s, "phone notification ignored (mirroring disabled)".to_string())
+            });
+            return;
+        }
+        let Some(notification) = NotificationView::from_payload(&message.payload) else {
+            self.status(|s| {
+                push_log(
+                    s,
+                    "phone notification rejected: missing app, title and text".to_string(),
+                )
+            });
+            self.send_error(
+                "invalid_payload",
+                "notification.post needs a non-empty app and a title or text",
+            );
+            return;
+        };
+
+        let toast_title = if notification.title.is_empty() {
+            notification.app.clone()
+        } else {
+            format!("{} · {}", notification.app, notification.title)
+        };
+        let toast_body = if notification.text.is_empty() {
+            "Open Nexus to see it".to_string()
+        } else {
+            notification.text.clone()
+        };
+        if let Err(e) = self
+            .app
+            .notification()
+            .builder()
+            .title(toast_title)
+            .body(toast_body)
+            .show()
+        {
+            tracing::debug!("notification toast couldn't be shown: {e}");
+        }
+
+        let app = notification.app.clone();
+        self.status(|s| {
+            s.notifications.insert(0, notification);
+            if s.notifications.len() > NOTIFICATION_LIMIT {
+                s.notifications.truncate(NOTIFICATION_LIMIT);
+            }
+            // Content stays in the list; the log only records the app.
+            push_log(s, format!("phone notification from {app}"));
+        });
     }
 
     // -- Clipboard events ------------------------------------------------
@@ -1155,6 +1325,10 @@ fn preview_of(text: &str) -> Option<String> {
     }
     preview = preview.replace('\n', " ");
     Some(preview)
+}
+
+fn one_line(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 fn push_log(status: &mut Status, line: impl Into<String>) {

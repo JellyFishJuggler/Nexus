@@ -34,10 +34,11 @@ data class DeviceInfo(
          * peers use it to decide which UI affordances to offer.
          *
          * `clipboard` is implemented as a foreground-only feature
-         * (protocol/clipboard.md § "Android limitations"); file transfer and
-         * media control do not exist yet.
+         * (protocol/clipboard.md § "Android limitations"); `notifications` is
+         * opt-in and phone→computer only. File transfer and media control do
+         * not exist yet.
          */
-        fun localFeatures(): List<String> = listOf("clipboard")
+        fun localFeatures(): List<String> = listOf("clipboard", "notifications")
 
         /**
          * Parse a peer identity, rejecting malformed payloads.

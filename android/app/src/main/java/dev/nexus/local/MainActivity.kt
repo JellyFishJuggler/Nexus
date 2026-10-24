@@ -1,9 +1,12 @@
 package dev.nexus.local
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -13,13 +16,16 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
-import dev.nexus.local.discovery.DiscoveryController
+import dev.nexus.local.service.NexusService
 import dev.nexus.local.ui.NexusActions
 import dev.nexus.local.ui.NexusApp
 import dev.nexus.local.ui.NexusUiState
@@ -28,16 +34,25 @@ import dev.nexus.local.ui.theme.ThemePreference
 
 class MainActivity : ComponentActivity() {
 
-    private lateinit var controller: DiscoveryController
+    private lateinit var controller: dev.nexus.local.discovery.DiscoveryController
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        controller = DiscoveryController(applicationContext)
+        controller = NexusRuntime.controller(applicationContext)
+
+        // The foreground service owns the network lifetime; opening the app
+        // (re)ensures it is running on Android 8+.
+        NexusService.start(this)
+        requestNotificationPermission()
 
         val activity = this
         setContent {
             var darkTheme by remember { mutableStateOf(ThemePreference.isDark(activity)) }
+            var preferencesVersion by remember { mutableIntStateOf(0) }
+            var notificationAccess by remember {
+                mutableStateOf(NexusPrefs.notificationAccessGranted(activity))
+            }
 
             NexusTheme(darkTheme = darkTheme) {
                 val peers by controller.peers.collectAsState()
@@ -50,10 +65,27 @@ class MainActivity : ComponentActivity() {
                 val lifecycleOwner = LocalLifecycleOwner.current
 
                 DisposableEffect(lifecycleOwner) {
+                    // Clipboard reads are only possible (and only performed)
+                    // while an activity is focused, so this half of the
+                    // lifecycle stays tied to the window. The service keeps
+                    // discovery/TLS up independently.
+                    val onResumed = {
+                        NexusRuntime.setActivityForeground(true)
+                        NexusService.start(activity)
+                        controller.startClipboard()
+                        notificationAccess = NexusPrefs.notificationAccessGranted(activity)
+                        // Preferences may have changed in system settings
+                        // while Nexus was away.
+                        preferencesVersion++
+                    }
                     val observer = LifecycleEventObserver { _, event ->
                         when (event) {
-                            Lifecycle.Event.ON_RESUME -> controller.start()
-                            Lifecycle.Event.ON_PAUSE -> controller.stop()
+                            Lifecycle.Event.ON_RESUME -> onResumed()
+                            Lifecycle.Event.ON_PAUSE -> {
+                                NexusRuntime.setActivityForeground(false)
+                                controller.stopClipboard()
+                            }
+
                             else -> Unit
                         }
                     }
@@ -63,7 +95,7 @@ class MainActivity : ComponentActivity() {
                     if (lifecycleOwner.lifecycle.currentState
                             .isAtLeast(Lifecycle.State.RESUMED)
                     ) {
-                        controller.start()
+                        onResumed()
                     }
                     onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
                 }
@@ -88,17 +120,29 @@ class MainActivity : ComponentActivity() {
                     pairingMode = pairingMode,
                     connectionLost = everReady && !session.ready,
                     reconnect = reconnect,
-                    darkTheme = darkTheme
+                    darkTheme = darkTheme,
+                    startOnBoot = remember(preferencesVersion) {
+                        NexusPrefs.startOnBoot(activity)
+                    },
+                    mirrorNotifications = remember(preferencesVersion) {
+                        NexusPrefs.mirrorNotifications(activity)
+                    },
+                    hideNotificationText = remember(preferencesVersion) {
+                        NexusPrefs.hideNotificationText(activity)
+                    },
+                    notificationAccess = notificationAccess
                 )
 
                 NexusApp(
                     state = state,
                     actions = NexusActions(
                         onStartPairing = { controller.startPairingMode() },
-                        // Refresh re-runs the existing discovery lifecycle.
+                        // Re-run the existing discovery lifecycle without
+                        // taking down the service-owned TLS listener.
                         onRefresh = {
-                            controller.stop()
-                            controller.start()
+                            controller.stopNetwork()
+                            controller.startNetwork()
+                            NexusService.start(activity)
                         },
                         onPair = { peer ->
                             if (peer.host.isNotEmpty() && peer.port in 1..65535) {
@@ -114,7 +158,29 @@ class MainActivity : ComponentActivity() {
                         onToggleDarkTheme = { enabled ->
                             darkTheme = enabled
                             ThemePreference.setDark(activity, enabled)
-                        }
+                        },
+                        onToggleStartOnBoot = { enabled ->
+                            NexusPrefs.setStartOnBoot(activity, enabled)
+                            preferencesVersion++
+                        },
+                        onToggleMirrorNotifications = { enabled ->
+                            // Mirroring is opt-in and requires the system
+                            // notification-listener grant. Ask for it instead
+                            // of silently pretending the switch worked.
+                            if (enabled &&
+                                !NexusPrefs.notificationAccessGranted(activity)
+                            ) {
+                                openNotificationAccess()
+                            } else {
+                                NexusPrefs.setMirrorNotifications(activity, enabled)
+                                preferencesVersion++
+                            }
+                        },
+                        onToggleHideNotificationText = { enabled ->
+                            NexusPrefs.setHideNotificationText(activity, enabled)
+                            preferencesVersion++
+                        },
+                        onOpenNotificationAccess = ::openNotificationAccess
                     )
                 )
             }
@@ -133,6 +199,31 @@ class MainActivity : ComponentActivity() {
         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(REPOSITORY_URL))
         runCatching { startActivity(intent) }
             .onFailure { Log.w(TAG, "no app available to open the repository link") }
+    }
+
+    /**
+     * Sends the user to the system screen where notification-listener access
+     * is granted. The app cannot grant it itself, by design.
+     */
+    private fun openNotificationAccess() {
+        val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+        runCatching { startActivity(intent) }
+            .onFailure { Log.w(TAG, "no settings screen for notification access") }
+    }
+
+    /** The foreground-service notification needs the runtime grant on 13+. */
+    private fun requestNotificationPermission() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        val granted = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.POST_NOTIFICATIONS
+        ) == PackageManager.PERMISSION_GRANTED
+        if (granted) return
+        ActivityCompat.requestPermissions(
+            this,
+            arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+            REQUEST_POST_NOTIFICATIONS
+        )
     }
 
     /**
@@ -204,6 +295,8 @@ class MainActivity : ComponentActivity() {
         private const val EXTRA_SET_CLIPBOARD = "nexus_set_clipboard"
         private const val EXTRA_READ_CLIPBOARD = "nexus_read_clipboard"
         private const val EXTRA_EXPECT_CLIPBOARD = "nexus_expect_clipboard"
+
+        private const val REQUEST_POST_NOTIFICATIONS = 1001
 
         /** Process-wide so activity re-creation does not re-run the harness. */
         @Volatile

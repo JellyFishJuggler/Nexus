@@ -59,3 +59,15 @@ pub fn push_clipboard(shared: State<'_, Arc<Shared>>) {
 pub fn respond_pairing(shared: State<'_, Arc<Shared>>, token: String, accept: bool) -> bool {
     shared.respond_pairing(&token, accept)
 }
+
+/// Show or hide phone→computer notification mirroring.
+#[tauri::command]
+pub fn set_notifications_enabled(shared: State<'_, Arc<Shared>>, enabled: bool) {
+    shared.send(Command::SetNotificationsEnabled(enabled));
+}
+
+/// Clear the in-memory list of mirrored notifications.
+#[tauri::command]
+pub fn clear_notifications(shared: State<'_, Arc<Shared>>) {
+    shared.send(Command::ClearNotifications);
+}

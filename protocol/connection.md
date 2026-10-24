@@ -40,7 +40,7 @@ peers), **both sides** send `system.hello` concurrently:
     "name": "My Phone",
     "platform": "android",
     "pv": 1,
-    "features": ["clipboard", "transfer", "media"]
+    "features": ["clipboard", "transfer", "media", "notifications"]
   }
 }
 ```
@@ -55,6 +55,9 @@ Rules:
   the pinned entry ⇒ close and WARN (identity tampering).
 - The connection is not "application-ready" until the local side has both
   sent and received hello.
+- `features` advertises the feature identifiers this build implements (for
+  example `clipboard`, `notifications`). Peers use it to decide which
+  affordances to offer; unknown identifiers are ignored.
 
 ## Heartbeat
 

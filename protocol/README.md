@@ -14,6 +14,7 @@ documents.
 | [pairing.md](pairing.md) | Implemented (Rust) | TLS channel, trust establishment, verification code |
 | [connection.md](connection.md) | Implemented (Rust) | Hello/version negotiation, heartbeat, reconnection |
 | [clipboard.md](clipboard.md) | Draft | Two-way clipboard sync, loop prevention |
+| [notifications.md](notifications.md) | Implemented (Android sender, desktop receiver) | Phone → computer notification mirroring, privacy filters |
 | [transfer.md](transfer.md) | Draft | Chunked file transfer, integrity |
 | [media.md](media.md) | Draft | Remote media control |
 

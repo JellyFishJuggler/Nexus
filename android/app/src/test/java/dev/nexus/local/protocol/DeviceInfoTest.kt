@@ -62,12 +62,13 @@ class DeviceInfoTest {
     }
 
     @Test
-    fun thisBuildAdvertisesClipboardOnly() {
+    fun thisBuildAdvertisesExactlyTheImplementedFeatures() {
         // The list must stay accurate so peers don't offer features we can't
-        // honour. Clipboard is implemented (foreground-only); transfers and
-        // media control are not.
+        // honour. Clipboard is implemented (foreground-only), notification
+        // mirroring is implemented (opt-in, phone→computer only); transfers
+        // and media control are not.
         val features = DeviceInfo.localFeatures()
-        assertEquals(listOf("clipboard"), features)
+        assertEquals(listOf("clipboard", "notifications"), features)
         assertTrue("transfer must not be advertised yet", "transfer" !in features)
         assertTrue("media must not be advertised yet", "media" !in features)
     }
