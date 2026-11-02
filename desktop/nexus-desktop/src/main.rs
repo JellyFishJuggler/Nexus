@@ -9,7 +9,7 @@ mod app;
 mod clipboard;
 mod commands;
 
-use tauri::Manager;
+use tauri::{menu::{Menu, MenuItem}, tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}, Manager};
 use tracing_subscriber::EnvFilter;
 
 fn main() {
@@ -31,19 +31,50 @@ fn main() {
             let shared = shared.clone();
             move |app| {
                 app.manage(shared.clone());
+                let open = MenuItem::with_id(app, "open", "Open Nexus", true, None::<&str>)?;
+                let quit = MenuItem::with_id(app, "quit", "Exit Nexus", true, None::<&str>)?;
+                let menu = Menu::with_items(app, &[&open, &quit])?;
+                TrayIconBuilder::new()
+                    .icon(app.default_window_icon().expect("default app icon is configured").clone())
+                    .tooltip("Nexus")
+                    .menu(&menu)
+                    .on_menu_event(|app, event| match event.id().as_ref() {
+                        "open" => {
+                            if let Some(window) = app.get_webview_window("main") {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                            }
+                        }
+                        "quit" => {
+                            if let Some(shared) = app.try_state::<std::sync::Arc<app::Shared>>() {
+                                shared.send(app::Command::Shutdown);
+                            }
+                            app.exit(0);
+                        }
+                        _ => {}
+                    })
+                    .on_tray_icon_event(|tray, event| {
+                        if let TrayIconEvent::Click {
+                            button: MouseButton::Left,
+                            button_state: MouseButtonState::Up,
+                            ..
+                        } = event {
+                            if let Some(window) = tray.app_handle().get_webview_window("main") {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                            }
+                        }
+                    })
+                    .build(app)?;
                 let handle = app.handle().clone();
                 tauri::async_runtime::spawn(app::run(shared, cmd_rx, handle));
                 Ok(())
             }
         })
         .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { .. } = event {
-                if let Some(shared) = window
-                    .app_handle()
-                    .try_state::<std::sync::Arc<app::Shared>>()
-                {
-                    shared.send(app::Command::Shutdown);
-                }
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
             }
         })
         .invoke_handler(tauri::generate_handler![
