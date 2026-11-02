@@ -40,6 +40,20 @@ object Frames {
         return out
     }
 
+    /** Parse a UUID from big-endian bytes at the given offset. */
+    fun uuidFromBytes(bytes: ByteArray, offset: Int): UUID? {
+        if (offset + 16 > bytes.size) return null
+        var msb: Long = 0
+        var lsb: Long = 0
+        for (i in 0 until 8) {
+            msb = (msb shl 8) or (bytes[offset + i].toLong() and 0xff)
+        }
+        for (i in 0 until 8) {
+            lsb = (lsb shl 8) or (bytes[offset + 8 + i].toLong() and 0xff)
+        }
+        return runCatching { UUID(msb, lsb) }.getOrNull()
+    }
+
     /** One decoded frame. [body] is the raw body after the type byte. */
     data class Frame(val type: Byte, val body: ByteArray) {
         override fun equals(other: Any?): Boolean =
@@ -121,6 +135,15 @@ object Frames {
         body.write(uuidBytes(transferId))
         body.write(chunk)
         write(out, DATA, body.toByteArray())
+    }
+
+    /** Output stream used for writing DATA frames (the TLS socket output). */
+    fun dataOutputStream(out: OutputStream): OutputStream = object : OutputStream() {
+        override fun write(b: Int) { throw UnsupportedOperationException() }
+        override fun write(b: ByteArray, off: Int, len: Int) {
+            // Not used directly; callers use writeData
+            out.write(b, off, len)
+        }
     }
 
     private fun readFully(input: InputStream, buffer: ByteArray, offset: Int, count: Int) {

@@ -61,6 +61,12 @@ class Connection(
         /** Every well-formed non-system control message. Called on the read thread. */
         fun onMessage(conn: Connection, env: Envelope)
 
+        /**
+         * A binary DATA frame (framing.md). Only legal after the peer accepted
+         * a transfer; the transfer layer validates the `transfer_id`.
+         */
+        fun onDataFrame(conn: Connection, transferId: java.util.UUID, chunk: ByteArray)
+
         /** Session ended. Called once, on the read thread. */
         fun onClosed(conn: Connection, reason: String)
     }
@@ -68,7 +74,16 @@ class Connection(
     private val input = BufferedInputStream(socket.getInputStream())
     private val output = BufferedOutputStream(socket.getOutputStream())
 
-    /** Peer leaf certificate, pinned material for the trust store. */
+    /** Raw output stream for DATA frames (synchronized like control writes). */
+    fun transferOutputStream(): java.io.OutputStream = object : java.io.OutputStream() {
+        override fun write(b: Int) {
+            val buf = byteArrayOf(b.toByte())
+            synchronized(output) { output.write(buf); output.flush() }
+        }
+        override fun write(b: ByteArray, off: Int, len: Int) {
+            synchronized(output) { output.write(b, off, len); output.flush() }
+        }
+    }
     val peerCertificate = Tls.peerCertificate(socket)
 
     /** SHA-256 fingerprint of the peer certificate, lowercase hex. */
@@ -157,10 +172,18 @@ class Connection(
                 when (frame.type) {
                     Frames.CONTROL -> handleControl(frame.body)
                     Frames.DATA -> {
-                        // Transfers are not implemented yet, and DATA before
-                        // an accepted transfer_id is a violation (framing.md).
-                        reason = "unexpected DATA frame (no transfer accepted)"
-                        break
+                        // 16-byte transfer_id prefix + chunk (framing.md).
+                        if (frame.body.size < 16) {
+                            reason = "protocol violation: DATA frame without transfer id"
+                            break
+                        }
+                        val tid = Frames.uuidFromBytes(frame.body, 0)
+                        if (tid == null) {
+                            reason = "protocol violation: bad transfer id"
+                            break
+                        }
+                        val chunk = frame.body.copyOfRange(16, frame.body.size)
+                        listener.onDataFrame(this, tid, chunk)
                     }
                 }
             }

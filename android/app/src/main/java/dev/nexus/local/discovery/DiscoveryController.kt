@@ -16,11 +16,13 @@ import dev.nexus.local.pairing.PairingManager
 import dev.nexus.local.protocol.DeviceInfo
 import dev.nexus.local.protocol.Envelope
 import dev.nexus.local.tls.Tls
+import dev.nexus.local.transfer.FileTransferManager
 import dev.nexus.local.trust.TrustedDevice
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONObject
+import java.io.File
 import java.util.concurrent.Executor
 
 /**
@@ -77,12 +79,14 @@ class DiscoveryController(context: Context) : DiscoveryManager.Listener, Connect
                 peerName = peer.name,
                 peerDeviceId = peer.deviceId
             )
+            FileTransferManager.activeConnection = conn
             clipboard.beginSession()
             flushHarnessClipboard()
             mainExecutor.execute { onReconnectSucceeded(peer.deviceId) }
         }
 
         override fun onApplicationMessage(conn: Connection, peer: DeviceInfo, env: Envelope) {
+            if (transferManager.handleMessage(env, conn)) return
             when (env.type) {
                 "clipboard.update" -> handleClipboardUpdate(conn, env)
                 else -> {
@@ -94,6 +98,7 @@ class DiscoveryController(context: Context) : DiscoveryManager.Listener, Connect
 
         override fun onSessionClosed(conn: Connection, reason: String) {
             _sessionUi.value = SessionUi()
+            FileTransferManager.activeConnection = null
             clipboard.endSession()
         }
     })
@@ -103,6 +108,15 @@ class DiscoveryController(context: Context) : DiscoveryManager.Listener, Connect
 
     val localPort: Int get() = server.port
     val localIdentity: DeviceIdentity get() = identity
+
+    /** File transfer manager (shared). */
+    val transferManager: FileTransferManager by lazy {
+        FileTransferManager(context, { env: dev.nexus.local.protocol.Envelope -> session.send(env) }) {
+            val dir = File(context.getExternalFilesDir(null) ?: context.filesDir, "NexusTransfers")
+            dir.mkdirs()
+            dir
+        }
+    }
 
     /** Pairing prompt / result for the UI. */
     val pairingUi: StateFlow<PairingManager.Ui> get() = pairing.ui
@@ -546,6 +560,10 @@ class DiscoveryController(context: Context) : DiscoveryManager.Listener, Connect
 
     override fun onMessage(conn: Connection, env: Envelope) {
         pairing.onMessage(conn, env)
+    }
+
+    override fun onDataFrame(conn: Connection, transferId: java.util.UUID, chunk: ByteArray) {
+        transferManager.handleDataFrame(transferId, chunk, conn)
     }
 
     override fun onClosed(conn: Connection, reason: String) {

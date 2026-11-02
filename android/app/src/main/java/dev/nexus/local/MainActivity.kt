@@ -36,6 +36,42 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var controller: dev.nexus.local.discovery.DiscoveryController
 
+    private fun handleShareIntentInternal(intent: Intent?) {
+        if (intent == null) return
+        val action = intent.action ?: return
+        if (action != Intent.ACTION_SEND && action != Intent.ACTION_SEND_MULTIPLE) return
+        if (!::controller.isInitialized) return
+        try {
+            if (action == Intent.ACTION_SEND) {
+                val uri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+                } else {
+                    @Suppress("DEPRECATION")
+                    intent.getParcelableExtra(Intent.EXTRA_STREAM)
+                }
+                if (uri != null) {
+                    controller.transferManager.offerFile(uri)
+                    return
+                }
+            } else if (action == Intent.ACTION_SEND_MULTIPLE) {
+                val uris = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri::class.java)
+                } else {
+                    @Suppress("DEPRECATION")
+                    intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM)
+                }
+                if (uris != null && uris.isNotEmpty()) {
+                    controller.transferManager.offerFile(uris[0])
+                    return
+                }
+            }
+        } catch (e: Exception) {
+            Log.w("NexusShare", "share failed: ${e.message}")
+        }
+    }
+
+    private fun handleShareIntent(intent: Intent?) = handleShareIntentInternal(intent)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -45,6 +81,8 @@ class MainActivity : ComponentActivity() {
         // (re)ensures it is running on Android 8+.
         NexusService.start(this)
         requestNotificationPermission()
+
+        handleShareIntentInternal(intent)
 
         val activity = this
         setContent {
@@ -191,6 +229,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        setIntent(intent)
+        handleShareIntentInternal(intent)
         handleHarnessIntent(intent)
     }
 
@@ -224,6 +264,19 @@ class MainActivity : ComponentActivity() {
             arrayOf(Manifest.permission.POST_NOTIFICATIONS),
             REQUEST_POST_NOTIFICATIONS
         )
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQUEST_POST_NOTIFICATIONS &&
+            grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED
+        ) {
+            UpdateChecker.check(this)
+        }
     }
 
     /**

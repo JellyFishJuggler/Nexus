@@ -141,6 +141,8 @@ const state = {
 };
 
 let lastSig = null;
+let lastUpdateCheckAt = 0;
+let updateCheckRunning = false;
 
 /* ------------------------------------------------------------------ shell */
 
@@ -800,6 +802,7 @@ async function refresh() {
     return;
   }
   state.status = s;
+  checkForUpdates(s.version);
 
   const now = Date.now();
   for (const id of Object.keys(state.pending)) {
@@ -811,6 +814,55 @@ async function refresh() {
   if (sig !== lastSig) {
     lastSig = sig;
     render();
+  }
+}
+
+function compareVersions(a, b) {
+  const parts = (value) => String(value || "").replace(/^v/i, "").split(".").map((n) => {
+    const match = /^(\d+)/.exec(n);
+    return match ? Number(match[1]) : 0;
+  });
+  const left = parts(a);
+  const right = parts(b);
+  for (let i = 0; i < Math.max(left.length, right.length); i++) {
+    const diff = (left[i] || 0) - (right[i] || 0);
+    if (diff) return diff;
+  }
+  return 0;
+}
+
+async function checkForUpdates(installedVersion) {
+  if (updateCheckRunning || Date.now() - lastUpdateCheckAt < 6 * 60 * 60 * 1000) return;
+  updateCheckRunning = true;
+  lastUpdateCheckAt = Date.now();
+  try {
+    const response = await fetch(
+      "https://api.github.com/repos/JellyFishJuggler/Nexus/tags?per_page=100",
+      { headers: { Accept: "application/vnd.github+json" } }
+    );
+    if (!response.ok) return;
+    const tags = await response.json();
+    const newest = tags
+      .map((tag) => tag.name)
+      .filter((tag) => /^v?\d+\.\d+(\.\d+)*$/.test(tag))
+      .sort((a, b) => compareVersions(b, a))[0];
+    if (!newest || compareVersions(newest, installedVersion) <= 0) return;
+    if (localStorage.getItem("nexus.update.notified") === newest) return;
+
+    const notification = window.__TAURI__.notification;
+    let permitted = await notification.isPermissionGranted();
+    if (!permitted) permitted = (await notification.requestPermission()) === "granted";
+    if (permitted) {
+      notification.sendNotification({
+        title: "Nexus update available",
+        body: `Nexus version ${newest} has been published.`,
+      });
+      localStorage.setItem("nexus.update.notified", newest);
+    }
+  } catch (err) {
+    console.debug("update check unavailable", err);
+  } finally {
+    updateCheckRunning = false;
   }
 }
 

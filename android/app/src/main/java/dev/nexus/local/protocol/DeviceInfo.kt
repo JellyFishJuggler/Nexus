@@ -38,7 +38,7 @@ data class DeviceInfo(
          * opt-in and phone→computer only. File transfer and media control do
          * not exist yet.
          */
-        fun localFeatures(): List<String> = listOf("clipboard", "notifications")
+        fun localFeatures(): List<String> = listOf("clipboard", "notifications", "transfer")
 
         /**
          * Parse a peer identity, rejecting malformed payloads.

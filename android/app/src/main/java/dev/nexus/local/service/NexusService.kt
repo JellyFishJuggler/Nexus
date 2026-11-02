@@ -17,6 +17,7 @@ import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import dev.nexus.local.MainActivity
 import dev.nexus.local.NexusRuntime
+import dev.nexus.local.UpdateChecker
 import dev.nexus.local.R
 import dev.nexus.local.discovery.DiscoveryController
 import dev.nexus.local.pairing.PairingManager
@@ -52,6 +53,7 @@ class NexusService : Service() {
     override fun onCreate() {
         super.onCreate()
         createChannels()
+        UpdateChecker.check(this)
         controller = NexusRuntime.controller(this)
 
         promoteToForeground(buildStatusNotification(null, null, emptyList()))
